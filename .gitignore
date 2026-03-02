@@ -32,3 +32,4 @@ coverage/
 /notes/
 /config/
 /db/
+*.db
