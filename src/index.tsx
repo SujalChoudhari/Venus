@@ -8,7 +8,7 @@ import { LoadingSpinner } from "./components/LoadingSpinner";
 import { ViewSwitcher } from "./components/ViewSwitcher";
 import { KnowledgeGraphPanel } from "./components/KnowledgeGraphPanel";
 import { GraphView } from "./components/GraphView";
-import { ActivityPanel, type ToolActivity } from "./components/ActivityPanel";
+import { ActivityPanel } from "./components/ActivityPanel";
 import { SystemStatsPanel } from "./components/SystemStatsPanel";
 import { MemoryBrowser } from "./components/MemoryBrowser";
 import { ToolLog, type ToolLogEntry } from "./components/ToolLog";
@@ -27,13 +27,34 @@ import {
   getChatMessages,
   createChatSession,
   deleteChatSession,
+  type ChatSession,
+  type ChatMessage,
 } from "./core/memory";
-import { initializeAi, runAgentLoop } from "./core/chat/service";
+import { initializeAi, runAgentLoop, type GeminiMessage } from "./core/chat/service";
 
 import { Theme } from "./core/theme";
 
 export type ViewId = "dashboard" | "memory" | "tools" | "mcp" | "graph" | "notes";
 export type AppMode = "CHAT" | "COMMAND" | "INSERT";
+
+type CountRow = { count: number };
+type MemoryBrowserRow = {
+  id: string;
+  topic: string;
+  content: string;
+  embedding_model: string | null;
+  has_embedding: number;
+};
+const WELCOME_MESSAGE = "NEW SESSION\nContinuing your journey... what's on your mind?";
+const DEFAULT_MODEL = "gemma-3-27b-it";
+const randomId = () => Math.random().toString(36).slice(2);
+const toUiMessage = (m: ChatMessage): Message => ({
+  id: m.id,
+  role: m.role,
+  content: m.content,
+  timestamp: new Date(m.timestamp),
+  type: m.type,
+});
 
 const App: React.FC = () => {
   const { stdout } = useStdout();
@@ -45,7 +66,7 @@ const App: React.FC = () => {
     {
       id: "welcome",
       role: "assistant",
-      content: "NEW SESSION\nContinuing your journey... what's on your mind?",
+      content: WELCOME_MESSAGE,
       timestamp: new Date(),
     },
   ]);
@@ -54,12 +75,12 @@ const App: React.FC = () => {
   const [loadingLabel, setLoadingLabel] = useState("Loading...");
   const [mcpStatus, setMcpStatus] = useState("ready");
   const [history, setHistory] = useState<string[]>([]);
-  const conversationHistory = useRef<any[]>([]);
+  const conversationHistory = useRef<GeminiMessage[]>([]);
   const [activeView, setActiveView] = useState<ViewId>("dashboard");
   const [toolActivities, setToolActivities] = useState<ToolLogEntry[]>([]);
   const [memoryCount, setMemoryCount] = useState(0);
   const [showSplash, setShowSplash] = useState(true);
-  const [sessions, setSessions] = useState<any[]>([]);
+  const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [appMode, setAppMode] = useState<AppMode>("CHAT");
 
 
@@ -115,32 +136,32 @@ const App: React.FC = () => {
     }
   });
 
+  const getLongTermMemoryCount = useCallback((): number => {
+    const db = getDatabase();
+    const row = db.query("SELECT COUNT(*) as count FROM long_term_memory").get() as CountRow | null;
+    return row?.count ?? 0;
+  }, []);
+
   const loadSessionData = useCallback((sessionId: string) => {
     const historicalMessages = getChatMessages(sessionId);
 
-    const uiMessages: Message[] = historicalMessages.map(m => ({
-      id: m.id,
-      role: m.role as any,
-      content: m.content,
-      timestamp: new Date(m.timestamp),
-      type: m.type as any
-    }));
+    const uiMessages = historicalMessages.map(toUiMessage);
 
     if (uiMessages.length === 0) {
       setMessages([{
         id: "welcome",
         role: "assistant",
-        content: "NEW SESSION\nContinuing your journey... what's on your mind?",
+        content: WELCOME_MESSAGE,
         timestamp: new Date()
       }]);
       conversationHistory.current = [];
     } else {
       setMessages(uiMessages);
-      const geminiHistory: any[] = [];
+      const geminiHistory: GeminiMessage[] = [];
       for (const m of historicalMessages) {
         if (m.type === 'text') {
           // Map DB roles to valid Gemma roles
-          const role = m.role === 'model' ? 'model' : 'user';
+          const role: GeminiMessage["role"] = m.role === 'model' ? 'model' : 'user';
           geminiHistory.push({ role, parts: [{ text: m.content }] });
         } else if (m.type === 'tool_call') {
           // Tool calls come from the model
@@ -171,9 +192,7 @@ const App: React.FC = () => {
         }]);
       }
 
-      const db = getDatabase();
-      const count = db.query("SELECT COUNT(*) as count FROM long_term_memory").get() as any;
-      setMemoryCount(count?.count || 0);
+      setMemoryCount(getLongTermMemoryCount());
 
       const existingSessions = getChatSessions();
       setSessions(existingSessions);
@@ -184,7 +203,7 @@ const App: React.FC = () => {
         sessionIdRef.current = lastSession.id; // Set ref immediately
         loadSessionData(lastSession.id);
       } else {
-        const newSession = createChatSession("New Conversation", "gemma-3-27b-it");
+        const newSession = createChatSession("New Conversation", DEFAULT_MODEL);
         setCurrentSessionId(newSession.id);
         sessionIdRef.current = newSession.id; // Set ref immediately
         setSessions([newSession]);
@@ -194,7 +213,7 @@ const App: React.FC = () => {
     init();
 
     return () => { closeDatabase(); };
-  }, [loadSessionData]);
+  }, [getLongTermMemoryCount, loadSessionData]);
 
 
   const handleSubmit = useCallback(async (input: string) => {
@@ -210,7 +229,7 @@ const App: React.FC = () => {
       switch (cmd) {
         case "new": {
           const title = args.join(" ") || "New Session";
-          const session = createChatSession(title, "gemma-3-27b-it");
+          const session = createChatSession(title, DEFAULT_MODEL);
           setCurrentSessionId(session.id);
           sessionIdRef.current = session.id;
           setSessions(getChatSessions());
@@ -226,7 +245,7 @@ const App: React.FC = () => {
           const list = getChatSessions();
           const text = list.map(s => `[${s.id.slice(0, 8)}] ${s.title} (${new Date(s.updated_at).toLocaleString()})`).join("\n");
           setMessages(prev => [...prev, {
-            id: Math.random().toString(),
+            id: randomId(),
             role: "assistant",
             content: `Available Sessions:\n${text}`,
             timestamp: new Date()
@@ -258,7 +277,7 @@ const App: React.FC = () => {
                 sessionIdRef.current = remaining[0].id;
                 loadSessionData(remaining[0].id);
               } else {
-                const session = createChatSession("New Session", "gemma-3-27b-it");
+                const session = createChatSession("New Session", DEFAULT_MODEL);
                 setCurrentSessionId(session.id);
                 sessionIdRef.current = session.id;
                 setMessages([]);
@@ -271,10 +290,8 @@ const App: React.FC = () => {
           const text = args.join(" ");
           if (!text) return;
           await storeMemory("general", text);
-          const db = getDatabase();
-          const count = db.query("SELECT COUNT(*) as count FROM long_term_memory").get() as any;
-          setMemoryCount(count?.count || 0);
-          setMessages(prev => [...prev, { id: Math.random().toString(), role: "assistant", content: "✅ Memory stored.", timestamp: new Date() }]);
+          setMemoryCount(getLongTermMemoryCount());
+          setMessages(prev => [...prev, { id: randomId(), role: "assistant", content: "✅ Memory stored.", timestamp: new Date() }]);
           return;
         }
         case "recall": {
@@ -282,7 +299,7 @@ const App: React.FC = () => {
           if (!topic) return;
           const recalled = queryMemoryByTopic(topic);
           const content = recalled.length > 0 ? recalled.map(m => `- ${m.content}`).join("\n") : "No memories found.";
-          setMessages(prev => [...prev, { id: Math.random().toString(), role: "assistant", content: `Recalled:\n${content}`, timestamp: new Date() }]);
+          setMessages(prev => [...prev, { id: randomId(), role: "assistant", content: `Recalled:\n${content}`, timestamp: new Date() }]);
           return;
         }
         case "dash":
@@ -295,7 +312,7 @@ const App: React.FC = () => {
 
         case "help":
           setMessages(prev => [...prev, {
-            id: Math.random().toString(), role: "assistant",
+            id: randomId(), role: "assistant",
             content: `Commands: /new /sessions /load /delete /memorize /recall /dash /chat /mem /mcp`,
             timestamp: new Date()
           }]);
@@ -306,7 +323,7 @@ const App: React.FC = () => {
 
     // Normal chat message
     const userMsg: Message = {
-      id: Math.random().toString(),
+      id: randomId(),
       role: "user",
       content: input,
       timestamp: new Date(),
@@ -333,7 +350,7 @@ const App: React.FC = () => {
             }
             return [
               ...prev,
-              { id: Math.random().toString(), role: "assistant", content: chunk.text, timestamp: new Date() },
+              { id: randomId(), role: "assistant", content: chunk.text, timestamp: new Date() },
             ];
           });
         } else if (chunk.type === "tool_call") {
@@ -347,7 +364,7 @@ const App: React.FC = () => {
           setToolActivities(prev => [...prev, activity]);
           setMessages((prev) => [
             ...prev,
-            { id: Math.random().toString(), role: "assistant", type: "tool_call", content: `Calling ${chunk.name}...`, timestamp: new Date() },
+            { id: randomId(), role: "assistant", type: "tool_call", content: `Calling ${chunk.name}...`, timestamp: new Date() },
           ]);
           setLoadingLabel(`Calling ${chunk.name}...`);
         } else if (chunk.type === "tool_result") {
@@ -356,40 +373,39 @@ const App: React.FC = () => {
           ));
           setMessages((prev) => [
             ...prev,
-            { id: Math.random().toString(), role: "assistant", type: "tool_result", content: chunk.output, timestamp: new Date() },
+            { id: randomId(), role: "assistant", type: "tool_result", content: chunk.output, timestamp: new Date() },
           ]);
         } else if (chunk.type === "waiting") {
           setLoadingLabel(`Rate limit hit. Retrying in ${chunk.seconds}s...`);
           setMessages((prev) => [
             ...prev,
-            { id: Math.random().toString(), role: "assistant", type: "system", content: `⏳ Rate limit exceeded. Retrying in ${chunk.seconds} seconds...`, timestamp: new Date() },
+            { id: randomId(), role: "assistant", type: "system", content: `⏳ Rate limit exceeded. Retrying in ${chunk.seconds} seconds...`, timestamp: new Date() },
           ]);
         } else if (chunk.type === "error") {
           setMessages((prev) => [
             ...prev,
-            { id: Math.random().toString(), role: "assistant", type: "system", content: `❌ Error: ${chunk.message}`, timestamp: new Date() },
+            { id: randomId(), role: "assistant", type: "system", content: `❌ Error: ${chunk.message}`, timestamp: new Date() },
           ]);
         }
       }
-    } catch (err: any) {
-      setMessages((prev) => [...prev, { id: Math.random().toString(), role: "assistant", content: `❌ ${err.message}`, timestamp: new Date() }]);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      setMessages((prev) => [...prev, { id: randomId(), role: "assistant", content: `❌ ${message}`, timestamp: new Date() }]);
     } finally {
       setIsLoading(false);
       setLoadingLabel("Loading...");
       setSessions(getChatSessions());
       // Refresh memory count
       try {
-        const db = getDatabase();
-        const count = db.query("SELECT COUNT(*) as count FROM long_term_memory").get() as any;
-        setMemoryCount(count?.count || 0);
+        setMemoryCount(getLongTermMemoryCount());
       } catch { }
     }
-  }, [isLoading, loadSessionData]);
+  }, [getLongTermMemoryCount, isLoading, loadSessionData]);
 
   const getMemoriesForBrowser = () => {
     try {
       const db = getDatabase();
-      return db.query("SELECT id, topic, content, embedding_model, embedding IS NOT NULL as has_embedding FROM long_term_memory ORDER BY updated_at DESC").all() as any[];
+      return db.query("SELECT id, topic, content, embedding_model, embedding IS NOT NULL as has_embedding FROM long_term_memory ORDER BY updated_at DESC").all() as MemoryBrowserRow[];
     } catch {
       return [];
     }

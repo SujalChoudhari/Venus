@@ -108,7 +108,13 @@ export function buildFullSystemPrompt(tools: ToolDefinition[]): string {
 /**
  * Build the prompt with retrieved context
  */
-export function buildRagPrompt(query: string, memories: any[]): string {
+type RagMemory = {
+    topic: string;
+    content: string;
+    relevance?: number;
+};
+
+export function buildRagPrompt(query: string, memories: RagMemory[]): string {
     if (memories.length === 0) {
         return query;
     }

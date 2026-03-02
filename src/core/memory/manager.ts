@@ -23,6 +23,14 @@ import {
   EMBEDDING_MODEL,
 } from "./embeddings";
 
+function memoryExists(id: string): boolean {
+  const db = getDatabase();
+  const row = db
+    .prepare("SELECT 1 as found FROM long_term_memory WHERE id = ? LIMIT 1")
+    .get(id) as { found: number } | undefined;
+  return !!row?.found;
+}
+
 /**
  * Store a new memory in long-term storage
  */
@@ -67,8 +75,22 @@ export async function storeMemory(
 
   // Auto-link to related memories if specified
   if (opts?.linkedIds) {
+    const seenTargets = new Set<string>();
     for (const targetId of opts.linkedIds) {
-      linkMemories(id, targetId, "related");
+      if (!targetId || targetId === id || seenTargets.has(targetId)) {
+        continue;
+      }
+      seenTargets.add(targetId);
+
+      if (!memoryExists(targetId)) {
+        continue;
+      }
+
+      try {
+        linkMemories(id, targetId, "related");
+      } catch {
+        // Best-effort linking: memory storage should not fail on bad link requests.
+      }
     }
   }
 
@@ -569,6 +591,13 @@ export function linkMemories(sourceId: string, targetId: string, relationType: s
   const db = getDatabase();
   const id = randomUUID();
   const now = Date.now();
+
+  if (!memoryExists(sourceId)) {
+    throw new Error(`Cannot link memories: source memory '${sourceId}' not found.`);
+  }
+  if (!memoryExists(targetId)) {
+    throw new Error(`Cannot link memories: target memory '${targetId}' not found.`);
+  }
 
   db.prepare(`
     INSERT INTO memory_links (id, source_id, target_id, relation_type, strength, created_at)

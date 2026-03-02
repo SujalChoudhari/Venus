@@ -18,9 +18,12 @@ interface ChatWindowProps {
   isStreaming?: boolean;
 }
 
-function safeTime(ts: any): string {
+function safeTime(ts: unknown): string {
   try {
     if (!ts) return "";
+    if (!(ts instanceof Date) && typeof ts !== "string" && typeof ts !== "number") {
+      return "";
+    }
     const d = ts instanceof Date ? ts : new Date(ts);
     if (isNaN(d.getTime())) return "";
     return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });

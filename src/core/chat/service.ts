@@ -9,12 +9,18 @@ export function initializeAi(apiKey: string) {
     ai = new GoogleGenAI({ apiKey });
 }
 
+export interface GeminiMessage {
+    role: "user" | "model";
+    parts: Array<{ text: string }>;
+    _isSystemPrompt?: boolean;
+}
+
 /**
  * Agentic event types emitted during AI response generation
  */
 export type AgentEvent =
     | { type: "text"; text: string }
-    | { type: "tool_call"; name: string; args: Record<string, any> }
+    | { type: "tool_call"; name: string; args: Record<string, unknown> }
     | { type: "tool_result"; name: string; output: string; isError: boolean }
     | { type: "waiting"; seconds: number }
     | { type: "error"; message: string };
@@ -25,7 +31,7 @@ export type AgentEvent =
 
 interface ParsedToolCall {
     name: string;
-    arguments: Record<string, any>;
+    arguments: Record<string, unknown>;
 }
 
 interface ParseResult {
@@ -71,8 +77,8 @@ function parseToolCalls(rawText: string): ParseResult {
  * - Merges consecutive same-role messages (required by Gemma)
  * - Strips internal properties like _isSystemPrompt
  */
-function sanitizeHistory(history: any[]): any[] {
-    const result: any[] = [];
+function sanitizeHistory(history: GeminiMessage[]): GeminiMessage[] {
+    const result: GeminiMessage[] = [];
 
     for (const msg of history) {
         const role = msg.role === "model" ? "model" : "user";
@@ -93,9 +99,9 @@ function sanitizeHistory(history: any[]): any[] {
 /**
  * Estimate token count for a message (~4 chars per token).
  */
-function estimateTokens(msg: any): number {
+function estimateTokens(msg: GeminiMessage): number {
     const text = (msg.parts || [])
-        .map((p: any) => p.text || "")
+        .map((p) => p.text || "")
         .join("");
     return Math.ceil(text.length / 4);
 }
@@ -107,7 +113,7 @@ function estimateTokens(msg: any): number {
  *   - The most recent messages
  * Removes oldest middle messages first.
  */
-function trimToTokenBudget(history: any[], maxTokens: number): void {
+function trimToTokenBudget(history: GeminiMessage[], maxTokens: number): void {
     let totalTokens = history.reduce((sum, msg) => sum + estimateTokens(msg), 0);
 
     if (totalTokens <= maxTokens) return;
@@ -132,7 +138,7 @@ function trimToTokenBudget(history: any[], maxTokens: number): void {
  */
 export async function* runAgentLoop(
     prompt: string,
-    conversationHistory: any[],
+    conversationHistory: GeminiMessage[],
     sessionId?: string
 ): AsyncGenerator<AgentEvent> {
     const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
@@ -188,17 +194,32 @@ export async function* runAgentLoop(
         // Gemma requires strict user/model alternation and only accepts those two roles
         const sanitizedContents = sanitizeHistory(conversationHistory);
 
-        let response: any;
+        type ResponsePart = { text?: string };
+        type GenerateContentResponse = {
+            candidates?: Array<{
+                content?: {
+                    parts?: ResponsePart[];
+                };
+            }>;
+        };
+
+        let response: GenerateContentResponse;
         try {
-            response = await ai.models.generateContent({
+            response = (await ai.models.generateContent({
                 model: MODEL_NAME,
                 contents: sanitizedContents,
                 // No systemInstruction or tools — Gemma doesn't support either
-            });
+            })) as GenerateContentResponse;
             consecutive429s = 0; // Reset on success
-        } catch (err: any) {
+        } catch (err: unknown) {
             // Handle 429 Resource Exhausted / Quota Exceeded
-            if (err?.status === "RESOURCE_EXHAUSTED" || err?.message?.includes("429") || err?.message?.includes("Quota exceeded")) {
+            const error = err as {
+                status?: string;
+                message?: string;
+                details?: Array<{ retryDelay?: string }>;
+            };
+
+            if (error?.status === "RESOURCE_EXHAUSTED" || error?.message?.includes("429") || error?.message?.includes("Quota exceeded")) {
                 consecutive429s++;
                 if (consecutive429s > MAX_429_RETRIES) {
                     yield { type: "error", message: `Exceeded max 429 retries. Your daily or minute quota for '${MODEL_NAME}' is likely fully exhausted.` };
@@ -208,11 +229,11 @@ export async function* runAgentLoop(
                 let retryAfterSeconds = 40; // Default fallback
 
                 // Attempt to parse retry delay from error message or details
-                const retryMatch = err.message?.match(/retry in\s+([\d.]+)/i);
+                const retryMatch = error.message?.match(/retry in\s+([\d.]+)/i);
                 if (retryMatch && retryMatch[1]) {
                     retryAfterSeconds = Math.ceil(parseFloat(retryMatch[1]));
-                } else if (err.details?.[0]?.retryDelay) {
-                    const delayStr = err.details[0].retryDelay;
+                } else if (error.details?.[0]?.retryDelay) {
+                    const delayStr = error.details[0].retryDelay;
                     retryAfterSeconds = parseInt(delayStr);
                 }
 
@@ -229,8 +250,8 @@ export async function* runAgentLoop(
         }
 
         // Extract the raw text from the response
-        const textParts = response.candidates?.[0]?.content?.parts?.filter((p: any) => p.text) ?? [];
-        const rawText = textParts.map((p: any) => p.text).join("") || "";
+        const textParts = response.candidates?.[0]?.content?.parts?.filter((p) => typeof p.text === "string") ?? [];
+        const rawText = textParts.map((p) => p.text ?? "").join("") || "";
 
         if (!rawText) {
             // Empty response — done
@@ -289,7 +310,7 @@ export async function* runAgentLoop(
                 }
 
                 const result = await toolRegistry.callTool(call.name, call.arguments, { sessionId });
-                const output = result.content.map((c: any) => c.text).join("\n");
+                const output = result.content.map((c) => c.text).join("\n");
 
                 yield { type: "tool_result", name: call.name, output, isError: !!result.isError };
 
