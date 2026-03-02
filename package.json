@@ -8,7 +8,11 @@
     "dev": "bun --watch src/index.tsx",
     "build": "bun build src/index.tsx --outdir dist --target bun",
     "start": "bun dist/index.js",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "test": "bun test tests/core/theme.test.ts && bun test tests/core/chat/prompts.test.ts && bun test tests/core/memory/embeddings.test.ts && bun test tests/core/memory/database.test.ts && bun test tests/core/memory/index.test.ts && bun test tests/core/memory/manager.test.ts && bun test tests/core/mcp/operations.test.ts && bun test tests/core/mcp/registry.test.ts && bun test tests/core/notes/service.test.ts && bun test tests/core/z_chat_service.test.ts",
+    "test:watch": "bun test --watch",
+    "test:coverage": "powershell -NoProfile -Command \"if (Test-Path coverage) { Remove-Item -Recurse -Force coverage }\" && bun test tests/core/theme.test.ts --coverage --coverage-reporter=lcov --coverage-dir=coverage/theme && bun test tests/core/chat/prompts.test.ts --coverage --coverage-reporter=lcov --coverage-dir=coverage/prompts && bun test tests/core/memory/embeddings.test.ts --coverage --coverage-reporter=lcov --coverage-dir=coverage/embeddings && bun test tests/core/memory/database.test.ts --coverage --coverage-reporter=lcov --coverage-dir=coverage/database && bun test tests/core/memory/index.test.ts --coverage --coverage-reporter=lcov --coverage-dir=coverage/memory-index && bun test tests/core/memory/manager.test.ts --coverage --coverage-reporter=lcov --coverage-dir=coverage/manager && bun test tests/core/mcp/operations.test.ts --coverage --coverage-reporter=lcov --coverage-dir=coverage/operations && bun test tests/core/mcp/registry.test.ts --coverage --coverage-reporter=lcov --coverage-dir=coverage/registry && bun test tests/core/notes/service.test.ts --coverage --coverage-reporter=lcov --coverage-dir=coverage/notes && bun test tests/core/z_chat_service.test.ts --coverage --coverage-reporter=lcov --coverage-dir=coverage/chat-service && bun run scripts/check-coverage.mjs",
+    "prepare": "simple-git-hooks"
   },
   "dependencies": {
     "@google/genai": "^1.43.0",
@@ -23,7 +27,11 @@
   "devDependencies": {
     "@types/bun": "latest",
     "@types/react": "^18.2.0",
+    "simple-git-hooks": "^2.13.1",
     "typescript": "^5.3.0"
+  },
+  "simple-git-hooks": {
+    "pre-commit": "bun run test"
   },
   "engines": {
     "bun": ">=1.0.0"
