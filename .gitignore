@@ -27,3 +27,8 @@ Thumbs.db
 
 # Other
 coverage/
+
+# Personal/local files
+/notes/
+/config/
+/db/

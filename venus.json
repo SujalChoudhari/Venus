@@ -1,0 +1,18 @@
+{
+  "version": "1.0",
+  "mcpServers": [
+    {
+      "name": "filesystem",
+      "command": "mcp-server-filesystem",
+      "args": ["--root", "./"]
+    }
+  ],
+  "memory": {
+    "vectorDb": true,
+    "embedModel": "nomic-embed-text"
+  },
+  "ui": {
+    "theme": "dark",
+    "commandMenuDelay": 300
+  }
+}

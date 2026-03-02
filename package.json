@@ -1,0 +1,31 @@
+{
+  "name": "venus",
+  "version": "0.1.0",
+  "description": "A lightning-fast terminal-based Second Brain and personal assistant",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "bun --watch src/index.tsx",
+    "build": "bun build src/index.tsx --outdir dist --target bun",
+    "start": "bun dist/index.js",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@google/genai": "^1.43.0",
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "@types/clipboardy": "^2.0.4",
+    "@xenova/transformers": "^2.17.2",
+    "clipboardy": "^5.3.1",
+    "dotenv": "^17.3.1",
+    "ink": "^5.0.1",
+    "react": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/react": "^18.2.0",
+    "typescript": "^5.3.0"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
+  }
+}
