@@ -1,9 +1,11 @@
 #!/usr/bin/env bun
 
 /**
- * Test Script for Venus Memory System
- * Tests /memorize, /forget, /recall, and /stats commands
+ * Manual integration smoke test for the memory layer.
+ * This script is intentionally verbose for human inspection.
  */
+import { existsSync, unlinkSync } from "node:fs";
+import { join } from "node:path";
 
 import {
   initializeDatabase,
@@ -16,15 +18,15 @@ import {
   clearScratchpad,
   storeScratchpad,
   getScratchpad,
-} from "./src/core/memory";
+} from "../../src/core/memory";
 
 console.log("🧪 Testing Venus Memory System\n");
 
 // Clean up old database for testing
 try {
-  const dbPath = "f:\\Workspace\\Venus\\db\\venus.db";
-  if (require("fs").existsSync(dbPath)) {
-    require("fs").unlinkSync(dbPath);
+  const dbPath = join(import.meta.dir, "../../src/db/venus.db");
+  if (existsSync(dbPath)) {
+    unlinkSync(dbPath);
     console.log("✓ Cleared old database");
   }
 } catch (e) {
@@ -44,9 +46,9 @@ try {
 // Test 2: Store memory
 console.log("\n2️⃣  Testing Memory Storage (/memorize)...");
 try {
-  const mem1 = storeMemory("project", "Building a CLI assistant for terminal");
-  const mem2 = storeMemory("project", "Using Bun as the runtime");
-  const mem3 = storeMemory("preferences", "Prefer lighting-fast tools");
+  const mem1 = await storeMemory("project", "Building a CLI assistant for terminal");
+  const mem2 = await storeMemory("project", "Using Bun as the runtime");
+  const mem3 = await storeMemory("preferences", "Prefer lightning-fast tools");
 
   console.log(`✓ Stored 3 memories`);
   console.log(`  - ID: ${mem1.id.slice(0, 8)}... (project)`);
@@ -114,6 +116,7 @@ try {
 // Test 7: Working memory (scratchpad)
 console.log("\n7️⃣  Testing Working Memory (Scratchpad)...");
 try {
+  clearScratchpad();
   const scratch1 = storeScratchpad("Currently reading Chapter 3 of the book");
   const scratch2 = storeScratchpad("Need to refactor the memory manager");
 

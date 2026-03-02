@@ -9,9 +9,9 @@ mock.module("@google/genai", () => ({
   },
 }));
 
-const registry = await import("../../src/core/mcp/registry");
-const memory = await import("../../src/core/memory");
-const service = await import("../../src/core/chat/service");
+const registry = await import("../../../src/core/mcp/registry");
+const memory = await import("../../../src/core/memory");
+const service = await import("../../../src/core/chat/service");
 
 async function collectEvents(prompt: string, history: service.GeminiMessage[], sessionId?: string) {
   const events: Array<Record<string, unknown>> = [];

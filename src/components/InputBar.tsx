@@ -236,9 +236,9 @@ export const InputBar: React.FC<InputBarProps> = ({
               dimColor={true}
             >
               {isCommandMode
-                ? "COMMAND MODE: ESC to Focus View | 1-6 Navigate"
+                ? "COMMAND MODE: ESC to focus panels | 1-6 navigate"
                 : isInsertMode
-                  ? "INSERT MODE: Focus is on Active View | ESC for Chat"
+                  ? "INSERT MODE: editing active panel | ESC for chat"
                   : ""}
             </Text>
           )}

@@ -1,94 +1,83 @@
-# Venus - A Lightning-Fast Terminal Second Brain
+# Venus
 
-## Overview
+Venus is a terminal-first knowledge assistant built with Bun, Ink, and SQLite.
+It combines chat, long-term memory, tool execution, and note-taking in a single CLI interface.
 
-Venus is an autonomous, proactive personal assistant and second brain for the terminal. It combines:
+## Features
 
-- **Reactive UI** with Ink (React for CLI)
-- **Long-term Memory** via SQLite with vector embeddings
-- **Command Orchestration** with slash commands
-- **MCP Integration** for external tools and extensions
+- Multi-panel terminal UI (chat, memory, tools, MCP, graph, notes)
+- Local memory store with semantic retrieval
+- Tool registry for file and memory operations
+- Session-based chat history with indexing
+- Automated non-UI test suite with strict coverage gating
 
-## Getting Started
+## Tech Stack
 
-### Prerequisites
+- Runtime: Bun
+- UI: Ink + React
+- Storage: SQLite (`bun:sqlite`)
+- Language: TypeScript
 
-- Bun 1.0+ ([install here](https://bun.sh))
-- Node.js 18+ (for dependencies)
+## Project Structure
 
-### Installation
+```text
+.
+├── src/
+│   ├── components/          # Ink UI components
+│   ├── core/
+│   │   ├── chat/            # Prompt + agent loop logic
+│   │   ├── mcp/             # Tool definitions and registry
+│   │   ├── memory/          # Database + memory manager
+│   │   ├── notes/           # Notepad service
+│   │   └── theme.ts
+│   ├── db/                  # Local sqlite file (ignored in git)
+│   ├── types/
+│   └── index.tsx            # App entry
+├── tests/core/              # Non-UI test suite
+├── scripts/
+│   ├── check-coverage.mjs   # Coverage gate script
+│   └── manual/              # Manual diagnostic/smoke scripts
+└── package.json
+```
+
+## Setup
 
 ```bash
 bun install
 ```
 
-### Development
+## Run
 
 ```bash
 bun run dev
 ```
 
-### Build
+## Build
 
 ```bash
 bun run build
 bun run start
 ```
 
-## Architecture
+## Quality Checks
 
-### Folder Structure
-
-```
-venus/
-├── src/
-│   ├── components/          # Ink React components
-│   │   ├── ChatWindow.tsx   # Main chat display
-│   │   ├── InputBar.tsx     # Sticky bottom input
-│   │   └── ContextHeader.tsx # Memory/status display
-│   ├── core/                # Core business logic
-│   │   ├── memory/          # SQLite & vector memory layer
-│   │   ├── commands/        # Command router & handlers
-│   │   └── mcp/             # MCP server orchestrator
-│   ├── types/               # Shared TypeScript types
-│   └── index.tsx            # Entry point
-├── db/                      # SQLite database storage
-├── config/                  # Configuration files
-├── venus.json               # MCP server configuration
-├── bunfig.toml              # Bun runtime config
-├── tsconfig.json            # TypeScript configuration
-├── package.json
-└── README.md
+```bash
+bun run type-check
+bun run test
+bun run test:coverage
 ```
 
-## Key Features (Roadmap)
+`test:coverage` enforces 100% coverage for non-UI modules (`src/core/**` and `src/types/**`, excluding hooks).
 
-- [x] Basic Ink UI scaffold
-- [x] Sticky bottom command input
-- [x] Command menu system (`/help`, `/read`, `/write`, etc.)
-- [ ] SQLite memory schema (vector + working)
-- [ ] MCP server spawning & stdio communication
-- [ ] Claude API integration for chat
-- [ ] File ingestion (`/read`)
-- [ ] Content generation (`/write`)
-- [ ] Memory persistence (`/memorize`)
-- [ ] Advanced UI features (spinners, progress bars)
+## Manual Diagnostics
 
-## Commands
+```bash
+bun run db:check
+bun run db:test
+bun run memory:smoke
+```
 
-- `/help` - Show available commands
-- `/read [filepath]` - Ingest a file into working memory
-- `/write [prompt] -> [filepath]` - Generate and write content
-- `/memorize [text]` - Store in long-term memory
-- `/forget [topic]` - Prune from database
+## Notes
 
-## Tech Stack
-
-- **Runtime:** Bun
-- **UI:** Ink + React
-- **Memory:** SQLite (`bun:sqlite`)
-- **IPC:** MCP (Model Context Protocol)
-
----
-
-_Built with ⚡ for lightning-fast context switching and autonomous assistance._
+- `src/db/*.db` is intentionally ignored.
+- Pre-commit runs `bun run test` via `simple-git-hooks`.

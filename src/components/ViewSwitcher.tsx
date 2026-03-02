@@ -35,7 +35,7 @@ export const ViewSwitcher: React.FC<ViewSwitcherProps> = ({
             >
                 <Box>
                     <Text color={Theme.colors.primary} bold>
-                        VENUS OS v1.0
+                        VENUS CONSOLE
                     </Text>
                     <Box marginLeft={2} flexDirection="row">
                         {VIEWS.map((v, idx) => {
@@ -60,7 +60,7 @@ export const ViewSwitcher: React.FC<ViewSwitcherProps> = ({
                     <Text color={Theme.colors.text.primary}> {memoryCount} </Text>
                     <Text color={Theme.colors.primary}>TOOLS:</Text>
                     <Text color={Theme.colors.text.primary}> {toolCount} </Text>
-                    <Text color={Theme.colors.primary}> STATUS:</Text>
+                    <Text color={Theme.colors.primary}> STATE:</Text>
                     <Text color={status === "ready" ? Theme.colors.text.primary : Theme.colors.status.error}>
                         {" "}
                         {status.toUpperCase()}{" "}

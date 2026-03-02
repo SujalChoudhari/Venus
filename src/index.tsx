@@ -45,7 +45,7 @@ type MemoryBrowserRow = {
   embedding_model: string | null;
   has_embedding: number;
 };
-const WELCOME_MESSAGE = "NEW SESSION\nContinuing your journey... what's on your mind?";
+const WELCOME_MESSAGE = "NEW SESSION\nYou're back in context. What should we focus on?";
 const DEFAULT_MODEL = "gemma-3-27b-it";
 const randomId = () => Math.random().toString(36).slice(2);
 const toUiMessage = (m: ChatMessage): Message => ({
@@ -82,6 +82,7 @@ const App: React.FC = () => {
   const [showSplash, setShowSplash] = useState(true);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [appMode, setAppMode] = useState<AppMode>("CHAT");
+  const sessionStartedAt = useRef(new Date());
 
 
   // *** USE A REF for session ID so it's always fresh in callbacks ***
@@ -235,7 +236,7 @@ const App: React.FC = () => {
           setSessions(getChatSessions());
           setMessages([{
             id: "welcome", role: "assistant",
-            content: `NEW SESSION: ${title}\nReady to chat!`,
+            content: `NEW SESSION: ${title}\nYou're all set. What should we work on?`,
             timestamp: new Date()
           }]);
           conversationHistory.current = [];
@@ -247,7 +248,7 @@ const App: React.FC = () => {
           setMessages(prev => [...prev, {
             id: randomId(),
             role: "assistant",
-            content: `Available Sessions:\n${text}`,
+            content: `Saved Sessions:\n${text || "No sessions found."}`,
             timestamp: new Date()
           }]);
           return;
@@ -313,7 +314,7 @@ const App: React.FC = () => {
         case "help":
           setMessages(prev => [...prev, {
             id: randomId(), role: "assistant",
-            content: `Commands: /new /sessions /load /delete /memorize /recall /dash /chat /mem /mcp`,
+            content: `Commands:\n/new /sessions /load /delete /memorize /recall /dash /chat /mem /notes /toollog /mcp /graph`,
             timestamp: new Date()
           }]);
           return;
@@ -376,10 +377,10 @@ const App: React.FC = () => {
             { id: randomId(), role: "assistant", type: "tool_result", content: chunk.output, timestamp: new Date() },
           ]);
         } else if (chunk.type === "waiting") {
-          setLoadingLabel(`Rate limit hit. Retrying in ${chunk.seconds}s...`);
+          setLoadingLabel(`Rate limit reached. Retrying in ${chunk.seconds}s...`);
           setMessages((prev) => [
             ...prev,
-            { id: randomId(), role: "assistant", type: "system", content: `⏳ Rate limit exceeded. Retrying in ${chunk.seconds} seconds...`, timestamp: new Date() },
+            { id: randomId(), role: "assistant", type: "system", content: `⏳ Rate limit reached. Retrying in ${chunk.seconds} seconds...`, timestamp: new Date() },
           ]);
         } else if (chunk.type === "error") {
           setMessages((prev) => [
@@ -499,7 +500,9 @@ const App: React.FC = () => {
                 : "ESC: Enter CHAT Mode  •  "}
             1-7: Switch View  •  Shift+↑↓: scroll chat  •  ↑↓: command history  •  TAB: cycle
           </Text>
-          <Text color={Theme.colors.text.muted} dimColor>v{require("../package.json").version}</Text>
+          <Text color={Theme.colors.text.muted} dimColor>
+            Session started {sessionStartedAt.current.toLocaleString()}
+          </Text>
         </Box>
       </Box>
     </Box>

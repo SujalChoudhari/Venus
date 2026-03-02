@@ -1,7 +1,17 @@
-import { initializeDatabase, getDatabase, createChatSession, addChatMessage, getChatMessages, getChatSessions } from './src/core/memory';
+#!/usr/bin/env bun
+/**
+ * Manual database smoke test for chat sessions/messages.
+ */
+import {
+  initializeDatabase,
+  getDatabase,
+  createChatSession,
+  addChatMessage,
+  getChatMessages,
+} from "../../src/core/memory";
 
 // Initialize
-await initializeDatabase();
+initializeDatabase();
 
 console.log("=== BEFORE ===");
 const db = getDatabase();
