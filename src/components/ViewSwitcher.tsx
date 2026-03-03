@@ -8,6 +8,7 @@ interface ViewSwitcherProps {
     memoryCount: number;
     toolCount: number;
     status: string;
+    helpShortcut?: string;
     viewHotkeys?: Partial<Record<ViewId, string>>;
 }
 
@@ -26,6 +27,7 @@ export const ViewSwitcher: React.FC<ViewSwitcherProps> = ({
     memoryCount,
     toolCount,
     status,
+    helpShortcut = "F1",
     viewHotkeys = {},
 }) => {
     return (
@@ -68,6 +70,8 @@ export const ViewSwitcher: React.FC<ViewSwitcherProps> = ({
                         {" "}
                         {status.toUpperCase()}{" "}
                     </Text>
+                    <Text color={Theme.colors.primary}> HELP:</Text>
+                    <Text color={Theme.colors.text.primary}> {helpShortcut} </Text>
                 </Box>
             </Box>
         </Box>

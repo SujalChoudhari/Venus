@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useStdin } from "ink";
+import { useStdout } from "ink";
 
 export interface MouseScrollOptions {
     isActive?: boolean;
@@ -9,6 +10,7 @@ export interface MouseScrollOptions {
 
 export function useMouseScroll({ isActive = true, onScrollUp, onScrollDown }: MouseScrollOptions) {
     const { stdin, isRawModeSupported, setRawMode } = useStdin();
+    const { stdout } = useStdout();
 
     // We use a ref for callbacks to avoid re-binding the stream listener on every render
     const callbacksRef = useRef({ onScrollUp, onScrollDown });
@@ -20,6 +22,9 @@ export function useMouseScroll({ isActive = true, onScrollUp, onScrollDown }: Mo
         }
 
         setRawMode(true);
+        // Enable mouse tracking (including wheel) + SGR extended mode.
+        // 1000: basic mouse, 1002: button-drag, 1003: any-motion, 1006: SGR encoding.
+        stdout?.write?.("\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h");
 
         const handleData = (data: Buffer) => {
             const str = data.toString("utf8");
@@ -53,7 +58,9 @@ export function useMouseScroll({ isActive = true, onScrollUp, onScrollDown }: Mo
 
         return () => {
             stdin.off("data", handleData);
+            // Disable mouse tracking modes when this hook deactivates.
+            stdout?.write?.("\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l");
             // We don't disable raw mode because Ink needs it
         };
-    }, [isActive, stdin, isRawModeSupported, setRawMode]);
+    }, [isActive, stdin, isRawModeSupported, setRawMode, stdout]);
 }

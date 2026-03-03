@@ -1,6 +1,8 @@
 import React, { useState } from "react";
 import { Box, Text, useStdout, useInput } from "ink";
 import { Theme } from "../core/theme";
+import { useMouseScroll } from "../core/hooks/useMouseScroll";
+import { Scrollbar } from "./Scrollbar";
 
 interface MemoryItem {
     id?: string;
@@ -53,6 +55,12 @@ export const MemoryBrowser: React.FC<MemoryBrowserProps> = ({ memories, appMode 
         }
     }, { isActive: appMode !== "CHAT" });
 
+    useMouseScroll({
+        isActive: appMode !== "CHAT",
+        onScrollUp: () => setScrollOffset(prev => Math.min(maxScroll, prev + 2)),
+        onScrollDown: () => setScrollOffset(prev => Math.max(0, prev - 2)),
+    });
+
     // Visible slice (from end, scrollOffset pushes up)
     const endIdx = allItems.length - scrollOffset;
     const startIdx = Math.max(0, endIdx - pageSize);
@@ -73,47 +81,54 @@ export const MemoryBrowser: React.FC<MemoryBrowserProps> = ({ memories, appMode 
                 </Box>
             )}
 
-            {topics.length === 0 ? (
-                <Box paddingX={2} flexGrow={1}>
-                    <Text color={Theme.colors.text.muted} italic>
-                        No memories stored yet. Use /memorize to add some.
-                    </Text>
-                </Box>
-            ) : (
-                <Box flexDirection="column" paddingX={1} flexGrow={1}>
-                    {visible.map((item, i) => {
-                        if (item.type === "topic") {
+            <Box flexDirection="row" flexGrow={1} paddingX={1}>
+                {topics.length === 0 ? (
+                    <Box paddingX={1} flexGrow={1}>
+                        <Text color={Theme.colors.text.muted} italic>
+                            No memories stored yet. Use /memorize to add some.
+                        </Text>
+                    </Box>
+                ) : (
+                    <Box flexDirection="column" flexGrow={1} overflow="hidden">
+                        {visible.map((item, i) => {
+                            if (item.type === "topic") {
+                                return (
+                                    <Box key={`t-${item.topic}-${i}`} marginTop={i > 0 ? 1 : 0}>
+                                        <Text color={Theme.colors.primary} bold>
+                                            ┌─ {item.topic} ({item.count}) ─
+                                        </Text>
+                                    </Box>
+                                );
+                            }
+
+                            const m = item.memory;
                             return (
-                                <Box key={`t-${item.topic}-${i}`} marginTop={i > 0 ? 1 : 0}>
-                                    <Text color={Theme.colors.primary} bold>
-                                        ┌─ {item.topic} ({item.count}) ─
-                                    </Text>
+                                <Box key={`m-${item.topic}-${i}`} marginLeft={1} flexDirection="column">
+                                    <Box>
+                                        <Text color={m.has_embedding ? Theme.colors.status.success : Theme.colors.status.error}>
+                                            {m.has_embedding ? "✔" : "○"}{" "}
+                                        </Text>
+                                        <Text color={Theme.colors.text.primary} wrap="wrap">
+                                            {m.content}
+                                        </Text>
+                                    </Box>
+                                    <Box marginLeft={2}>
+                                        <Text color={Theme.colors.text.muted} dimColor>
+                                            {m.embedding_model ? `[${m.embedding_model}]` : "[no vec]"}
+                                            {m.has_embedding ? "" : " ⚠ needs embedding"}
+                                        </Text>
+                                    </Box>
                                 </Box>
                             );
-                        }
-
-                        const m = item.memory;
-                        return (
-                            <Box key={`m-${item.topic}-${i}`} marginLeft={1} flexDirection="column">
-                                <Box>
-                                    <Text color={m.has_embedding ? Theme.colors.status.success : Theme.colors.status.error}>
-                                        {m.has_embedding ? "✔" : "○"}{" "}
-                                    </Text>
-                                    <Text color={Theme.colors.text.primary} wrap="wrap">
-                                        {m.content}
-                                    </Text>
-                                </Box>
-                                <Box marginLeft={2}>
-                                    <Text color={Theme.colors.text.muted} dimColor>
-                                        {m.embedding_model ? `[${m.embedding_model}]` : "[no vec]"}
-                                        {m.has_embedding ? "" : " ⚠ needs embedding"}
-                                    </Text>
-                                </Box>
-                            </Box>
-                        );
-                    })}
-                </Box>
-            )}
+                        })}
+                    </Box>
+                )}
+                {allItems.length > pageSize && (
+                    <Box width={1} marginLeft={1} flexShrink={0}>
+                        <Scrollbar show={pageSize} current={startIdx} total={allItems.length} />
+                    </Box>
+                )}
+            </Box>
 
             {canScrollDown && (
                 <Box justifyContent="center">

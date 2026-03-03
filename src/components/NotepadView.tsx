@@ -3,6 +3,7 @@ import { Box, Text, useInput, useStdout } from "ink";
 import { notepadService, NoteState } from "../core/notes/service";
 import { Theme } from "../core/theme";
 import { useMouseScroll } from "../core/hooks/useMouseScroll";
+import { Scrollbar } from "./Scrollbar";
 
 interface NotepadViewProps {
     mode?: "CHAT" | "COMMAND" | "INSERT";
@@ -243,7 +244,7 @@ export const NotepadView: React.FC<NotepadViewProps> = ({ mode = "CHAT", panelWi
         const isCtrlHome = (key.ctrl && isHome) || input === "\x1b[1;5H" || input === "\x1b[7;5~";
         const isCtrlEnd = (key.ctrl && isEnd) || input === "\x1b[1;5F" || input === "\x1b[8;5~";
         const isCtrlDelete = (key.ctrl && key.delete) || input === "\x1b[3;5~";
-        const isCtrlBackspace = (key.ctrl && key.backspace) || input === "\x08";
+        const isCtrlBackspace = key.ctrl && key.backspace;
 
         // --- File Switcher Overlay ---
         if (showFileSwitcher) {
@@ -689,7 +690,7 @@ export const NotepadView: React.FC<NotepadViewProps> = ({ mode = "CHAT", panelWi
     // --- Render Logic ---
     const visibleLines = lines.slice(scrollOffset, scrollOffset + termRows);
 
-    const renderRow = (lineStr: string, actualY: number): { before: string; cursor: string | null; after: string } => {
+    const renderRow = (lineStr: string, actualY: number): React.ReactNode => {
         const isCursorLine = actualY === cursor.y && isActive;
         const safeCursor = Math.max(0, Math.min(lineStr.length, cursor.x));
         const viewStart = isCursorLine
@@ -697,16 +698,36 @@ export const NotepadView: React.FC<NotepadViewProps> = ({ mode = "CHAT", panelWi
             : 0;
         const viewEnd = viewStart + viewportWidth;
 
-        if (!isCursorLine) {
-            const visible = lineStr.slice(viewStart, viewEnd);
-            return { before: visible || " ", cursor: null, after: "" };
-        }
+        const parts: React.ReactNode[] = [];
+        let runText = "";
+        let runKey = "normal";
 
-        const clampedCursor = Math.max(viewStart, Math.min(viewEnd - 1, safeCursor));
-        const before = lineStr.slice(viewStart, clampedCursor);
-        const cursorChar = lineStr[clampedCursor] ?? " ";
-        const after = lineStr.slice(clampedCursor + 1, viewEnd);
-        return { before, cursor: cursorChar, after };
+        const flushRun = (k: string) => {
+            if (!runText) return;
+            if (runKey === "cursor") {
+                parts.push(<Text key={k} backgroundColor={Theme.colors.primary} color={Theme.colors.text.inverse}>{runText}</Text>);
+            } else if (runKey === "selected") {
+                parts.push(<Text key={k} backgroundColor={Theme.colors.secondary} color={Theme.colors.text.inverse}>{runText}</Text>);
+            } else {
+                parts.push(<Text key={k} color={Theme.colors.text.primary}>{runText}</Text>);
+            }
+            runText = "";
+        };
+
+        for (let absX = viewStart; absX < viewEnd; absX++) {
+            const isCursorCell = isCursorLine && absX === safeCursor;
+            const inLine = absX < lineStr.length;
+            const ch = inLine ? lineStr[absX] : " ";
+            const isSel = inLine && isSelected(absX, actualY);
+            const nextKey = isCursorCell ? "cursor" : (isSel ? "selected" : "normal");
+            if (nextKey !== runKey) {
+                flushRun(`${actualY}-${absX}`);
+                runKey = nextKey;
+            }
+            runText += ch;
+        }
+        flushRun(`${actualY}-end`);
+        return <Text wrap="truncate-end">{parts.length > 0 ? parts : " "}</Text>;
     };
 
     return (
@@ -778,49 +799,40 @@ export const NotepadView: React.FC<NotepadViewProps> = ({ mode = "CHAT", panelWi
                     </Box>
                 </Box>
             ) : (
-                <Box flexGrow={1} flexDirection="column" overflow="hidden">
-                    {visibleLines.map((lineStr, idx) => {
-                        const actualY = idx + scrollOffset;
-                        const lineNum = String(actualY + 1).padStart(4, " ");
-                        return (
-                            <Box key={actualY} height={1} flexDirection="row" overflow="hidden" width="100%">
-                                <Box width={gutterWidth} flexShrink={0} overflow="hidden">
-                                    <Text color={Theme.colors.text.primary}>{` ${lineNum} │`}</Text>
+                <Box flexGrow={1} flexDirection="row" overflow="hidden">
+                    <Box flexDirection="column" flexGrow={1} overflow="hidden">
+                        {visibleLines.map((lineStr, idx) => {
+                            const actualY = idx + scrollOffset;
+                            const lineNum = String(actualY + 1).padStart(4, " ");
+                            return (
+                                <Box key={actualY} height={1} flexDirection="row" overflow="hidden" width="100%">
+                                    <Box width={gutterWidth} flexShrink={0} overflow="hidden">
+                                        <Text color={Theme.colors.text.primary}>{` ${lineNum} │`}</Text>
+                                    </Box>
+                                    <Box flexGrow={1} flexShrink={1} minWidth={0} overflow="hidden">
+                                        {renderRow(lineStr, actualY)}
+                                    </Box>
                                 </Box>
-                                <Box flexGrow={1} flexShrink={1} minWidth={0} overflow="hidden">
-                                    {(() => {
-                                        const row = renderRow(lineStr, actualY);
-                                        if (row.cursor === null) {
-                                            return (
-                                                <Text color={Theme.colors.text.primary} wrap="truncate-end">
-                                                    {row.before}
-                                                </Text>
-                                            );
-                                        }
-                                        return (
-                                            <Text wrap="truncate-end">
-                                                <Text color={Theme.colors.text.primary}>{row.before}</Text>
-                                                <Text backgroundColor={Theme.colors.primary} color={Theme.colors.text.inverse}>{row.cursor}</Text>
-                                                <Text color={Theme.colors.text.primary}>{row.after}</Text>
-                                            </Text>
-                                        );
-                                    })()}
+                            );
+                        })}
+                        {visibleLines.length < termRows &&
+                            Array.from({ length: termRows - visibleLines.length }).map((_, i) => (
+                                <Box key={`empty-${i}`} height={1} width="100%" flexDirection="row" overflow="hidden">
+                                    <Box width={gutterWidth} flexShrink={0} overflow="hidden">
+                                        <Text color={Theme.colors.secondary} bold dimColor>{"   ~ │"}</Text>
+                                    </Box>
+                                    <Box flexGrow={1} flexShrink={1} minWidth={0} overflow="hidden">
+                                        <Text>{" "}</Text>
+                                    </Box>
                                 </Box>
-                            </Box>
-                        );
-                    })}
-                    {visibleLines.length < termRows &&
-                        Array.from({ length: termRows - visibleLines.length }).map((_, i) => (
-                            <Box key={`empty-${i}`} height={1} width="100%" flexDirection="row" overflow="hidden">
-                                <Box width={gutterWidth} flexShrink={0} overflow="hidden">
-                                    <Text color={Theme.colors.secondary} bold dimColor>{"   ~ │"}</Text>
-                                </Box>
-                                <Box flexGrow={1} flexShrink={1} minWidth={0} overflow="hidden">
-                                    <Text>{" "}</Text>
-                                </Box>
-                            </Box>
-                        ))
-                    }
+                            ))
+                        }
+                    </Box>
+                    {lines.length > termRows && (
+                        <Box width={1} marginLeft={1} flexShrink={0}>
+                            <Scrollbar show={termRows} current={scrollOffset} total={lines.length} />
+                        </Box>
+                    )}
                 </Box>
             )}
 

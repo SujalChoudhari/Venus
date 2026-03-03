@@ -61,6 +61,46 @@ const toUiMessage = (m: ChatMessage): Message => ({
 
 const isEditableView = (view: ViewId): boolean => view === "notes" || view === "config";
 
+const HELP_BY_VIEW: Record<ViewId, string[]> = {
+  dashboard: [
+    "Chat: type and Enter to send",
+    "Scroll: Shift+Up/Down, PageUp/PageDown, mouse wheel",
+    "Jump: Ctrl+Up (top), Ctrl+Down (bottom)",
+  ],
+  notes: [
+    "Modes: i/Enter (insert), Esc (command/chat)",
+    "Files: Ctrl+S save, Ctrl+N new, Ctrl+O open, Ctrl+R rename, Ctrl+D delete",
+    "Edit: Ctrl+Z/Ctrl+Y undo/redo, Ctrl+C/X/V clipboard, Ctrl+A select all",
+    "Move: arrows, Home/End, Ctrl+Left/Right words, Ctrl+Home/End document",
+    "Delete: Backspace/Delete, Ctrl+Backspace/Ctrl+Delete word delete",
+    "Vim-like (command): h/j/k/l, w/b, 0/$, gg/G",
+    "Scroll: mouse wheel + right scrollbar",
+  ],
+  memory: [
+    "Browse memory records grouped by topic",
+    "Scroll: Shift+Up/Down, PageUp/PageDown, mouse wheel + scrollbar",
+  ],
+  tools: [
+    "Tool call history (args/output excerpt)",
+    "Scroll: Shift+Up/Down, PageUp/PageDown, mouse wheel + scrollbar",
+  ],
+  mcp: [
+    "Manage MCP tools and status",
+    "Use the view-specific keys shown in panel footer",
+  ],
+  graph: [
+    "Graph modes: G/L forward, H backward",
+    "Graph shortcuts modal: Ctrl+?, Ctrl+/, F1, ?",
+  ],
+  config: [
+    "Modes: i/Enter (insert), Esc (command/chat)",
+    "File: Ctrl+S save",
+    "Edit/move: same core editor shortcuts as Notes",
+    "Scroll: mouse wheel + right scrollbar",
+  ],
+};
+const HELP_SHORTCUT_LABEL = "F1 / Ctrl+K";
+
 const App: React.FC = () => {
   const { stdout } = useStdout();
   const { exit } = useApp();
@@ -88,6 +128,7 @@ const App: React.FC = () => {
   const [showSplash, setShowSplash] = useState(false);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [appMode, setAppMode] = useState<AppMode>("CHAT");
+  const [showHelpModal, setShowHelpModal] = useState(false);
   const sessionStartedAt = useRef(new Date());
 
 
@@ -116,7 +157,21 @@ const App: React.FC = () => {
   // - modeCycle toggles CHAT <-> COMMAND
   // - INSERT is entered explicitly from COMMAND on editable views
   // - Escape is always a reliable "back" key (INSERT -> COMMAND -> CHAT)
-  useInput((input, key) => {
+  useInput((input, key: any) => {
+    const isF1Shortcut = !!key.f1 || input === "\x1bOP" || /^\x1b\[[0-9;]*P$/.test(input);
+    const isCtrlKShortcut = input === "\x0b" || (key.ctrl && (input === "k" || input === "K"));
+    const isHelpShortcut = isF1Shortcut || isCtrlKShortcut;
+    if (isHelpShortcut) {
+      setShowHelpModal(prev => !prev);
+      return;
+    }
+    if (showHelpModal) {
+      if (key.escape || key.return) {
+        setShowHelpModal(false);
+      }
+      return;
+    }
+
     if (key.ctrl && input === "c") {
       if (appMode !== "INSERT" && activeView !== "notes") {
         exit();
@@ -585,24 +640,44 @@ ${blocks.join("\n\n")}`;
           memoryCount={memoryCount}
           toolCount={8}
           status={mcpStatus}
+          helpShortcut={HELP_SHORTCUT_LABEL}
           viewHotkeys={settings.shortcuts.commandViewHotkeys}
         />
       </Box>
 
       {/* Main area: center + sidebar — Sidebar hides in notes/insert mode for focus */}
       <Box flexDirection="row" flexGrow={1} flexBasis={0} overflow="hidden" height={mainAreaHeight}>
-        {/* Center panel */}
-        <Box flexDirection="column" flexGrow={1} flexBasis={0} overflow="hidden" >
-          {renderCenterPanel()}
-        </Box>
-
-        {/* Sidebar — configurable visibility */}
-        {showSidebar && (
-          <Box flexDirection="column" width={sidebarWidth} flexShrink={0} height={mainHeight}>
-            {settings.ui.showKnowledgeGraphPanel && <KnowledgeGraphPanel panelWidth={sidebarWidth} />}
-            {settings.ui.showActivityPanel && <ActivityPanel activities={toolActivities} />}
-            {settings.ui.showSystemStatsPanel && <SystemStatsPanel panelWidth={sidebarWidth} />}
+        {showHelpModal ? (
+          <Box flexGrow={1} justifyContent="center" alignItems="center" paddingX={2}>
+            <Box flexDirection="column" width="90%" borderStyle="round" borderColor={Theme.colors.primary} padding={1}>
+              <Text color={Theme.colors.primary} bold>{`HELP — ${activeView.toUpperCase()} (${appMode})`}</Text>
+              <Box marginTop={1} flexDirection="column">
+                {HELP_BY_VIEW[activeView].map((line, idx) => (
+                  <Text key={`help-${idx}`} color={Theme.colors.text.primary}>{`• ${line}`}</Text>
+                ))}
+                <Text color={Theme.colors.text.muted}>{`• Global: ${settings.shortcuts.modeCycle} mode cycle, ${settings.shortcuts.commandNextView}/${settings.shortcuts.commandPrevView} view switch, ${HELP_SHORTCUT_LABEL} help`}</Text>
+              </Box>
+              <Box marginTop={1}>
+                <Text color={Theme.colors.text.muted}>{`Press Esc, Enter, or ${HELP_SHORTCUT_LABEL} to close`}</Text>
+              </Box>
+            </Box>
           </Box>
+        ) : (
+          <>
+            {/* Center panel */}
+            <Box flexDirection="column" flexGrow={1} flexBasis={0} overflow="hidden" >
+              {renderCenterPanel()}
+            </Box>
+
+            {/* Sidebar — configurable visibility */}
+            {showSidebar && (
+              <Box flexDirection="column" width={sidebarWidth} flexShrink={0} height={mainHeight}>
+                {settings.ui.showKnowledgeGraphPanel && <KnowledgeGraphPanel panelWidth={sidebarWidth} />}
+                {settings.ui.showActivityPanel && <ActivityPanel activities={toolActivities} />}
+                {settings.ui.showSystemStatsPanel && <SystemStatsPanel panelWidth={sidebarWidth} />}
+              </Box>
+            )}
+          </>
         )}
       </Box>
 

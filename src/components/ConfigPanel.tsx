@@ -5,6 +5,7 @@ import { basename } from "node:path";
 import { Theme } from "../core/theme";
 import { notepadService } from "../core/notes/service";
 import { useMouseScroll } from "../core/hooks/useMouseScroll";
+import { Scrollbar } from "./Scrollbar";
 
 interface ConfigPanelProps {
   mode?: "CHAT" | "COMMAND" | "INSERT";
@@ -213,7 +214,7 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({ mode = "CHAT", configP
     const isCtrlHome = (key.ctrl && isHome) || input === "\x1b[1;5H" || input === "\x1b[7;5~";
     const isCtrlEnd = (key.ctrl && isEnd) || input === "\x1b[1;5F" || input === "\x1b[8;5~";
     const isCtrlDelete = (key.ctrl && key.delete) || input === "\x1b[3;5~";
-    const isCtrlBackspace = (key.ctrl && key.backspace) || input === "\x08";
+    const isCtrlBackspace = key.ctrl && key.backspace;
 
     if (key.ctrl) {
       if (input === "s") {
@@ -491,48 +492,55 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({ mode = "CHAT", configP
         </Text>
       </Box>
 
-      <Box flexGrow={1} flexDirection="column" overflow="hidden">
-        {visibleLines.map((lineStr, idx) => {
-          const actualY = idx + scrollOffset;
-          const lineNum = String(actualY + 1).padStart(4, " ");
-          return (
-            <Box key={actualY} height={1} flexDirection="row" overflow="hidden" width="100%">
-              <Box width={gutterWidth} flexShrink={0} overflow="hidden">
-                <Text color={Theme.colors.text.primary}>{` ${lineNum} │`}</Text>
-              </Box>
-              <Box flexGrow={1} flexShrink={1} minWidth={0} overflow="hidden">
-                {(() => {
-                  const row = renderRow(lineStr, actualY);
-                  if (row.cursor === null) {
+      <Box flexGrow={1} flexDirection="row" overflow="hidden">
+        <Box flexDirection="column" flexGrow={1} overflow="hidden">
+          {visibleLines.map((lineStr, idx) => {
+            const actualY = idx + scrollOffset;
+            const lineNum = String(actualY + 1).padStart(4, " ");
+            return (
+              <Box key={actualY} height={1} flexDirection="row" overflow="hidden" width="100%">
+                <Box width={gutterWidth} flexShrink={0} overflow="hidden">
+                  <Text color={Theme.colors.text.primary}>{` ${lineNum} │`}</Text>
+                </Box>
+                <Box flexGrow={1} flexShrink={1} minWidth={0} overflow="hidden">
+                  {(() => {
+                    const row = renderRow(lineStr, actualY);
+                    if (row.cursor === null) {
+                      return (
+                        <Text color={Theme.colors.text.primary} wrap="truncate-end">
+                          {row.before}
+                        </Text>
+                      );
+                    }
                     return (
-                      <Text color={Theme.colors.text.primary} wrap="truncate-end">
-                        {row.before}
+                      <Text wrap="truncate-end">
+                        <Text color={Theme.colors.text.primary}>{row.before}</Text>
+                        <Text backgroundColor={Theme.colors.primary} color={Theme.colors.text.inverse}>{row.cursor}</Text>
+                        <Text color={Theme.colors.text.primary}>{row.after}</Text>
                       </Text>
                     );
-                  }
-                  return (
-                    <Text wrap="truncate-end">
-                      <Text color={Theme.colors.text.primary}>{row.before}</Text>
-                      <Text backgroundColor={Theme.colors.primary} color={Theme.colors.text.inverse}>{row.cursor}</Text>
-                      <Text color={Theme.colors.text.primary}>{row.after}</Text>
-                    </Text>
-                  );
-                })()}
+                  })()}
+                </Box>
               </Box>
-            </Box>
-          );
-        })}
-        {visibleLines.length < termRows &&
-          Array.from({ length: termRows - visibleLines.length }).map((_, i) => (
-            <Box key={`empty-${i}`} height={1} width="100%" flexDirection="row" overflow="hidden">
-              <Box width={gutterWidth} flexShrink={0} overflow="hidden">
-                <Text color={Theme.colors.secondary} bold dimColor>{"   ~ │"}</Text>
+            );
+          })}
+          {visibleLines.length < termRows &&
+            Array.from({ length: termRows - visibleLines.length }).map((_, i) => (
+              <Box key={`empty-${i}`} height={1} width="100%" flexDirection="row" overflow="hidden">
+                <Box width={gutterWidth} flexShrink={0} overflow="hidden">
+                  <Text color={Theme.colors.secondary} bold dimColor>{"   ~ │"}</Text>
+                </Box>
+                <Box flexGrow={1} flexShrink={1} minWidth={0} overflow="hidden">
+                  <Text>{" "}</Text>
+                </Box>
               </Box>
-              <Box flexGrow={1} flexShrink={1} minWidth={0} overflow="hidden">
-                <Text>{" "}</Text>
-              </Box>
-            </Box>
-          ))}
+            ))}
+        </Box>
+        {lines.length > termRows && (
+          <Box width={1} marginLeft={1} flexShrink={0}>
+            <Scrollbar show={termRows} current={scrollOffset} total={lines.length} />
+          </Box>
+        )}
       </Box>
 
       <Box flexDirection="row" paddingX={1} flexShrink={0} justifyContent="space-between">

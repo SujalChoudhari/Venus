@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { Box, Text, useStdout, useInput } from "ink";
 import { getDatabase } from "../core/memory";
 import { Theme } from "../core/theme";
+import { useMouseScroll } from "../core/hooks/useMouseScroll";
 
 /**
  * Fullscreen Knowledge Graph - High-Res Braille Redesign
@@ -79,6 +80,24 @@ export const GraphView: React.FC<GraphViewProps> = ({ appMode = "CHAT" }) => {
             });
         }
     }, { isActive: isInteractive });
+
+    useMouseScroll({
+        isActive: isInteractive,
+        onScrollDown: () => {
+            setMode(prev => {
+                if (prev === "latest") return "dense";
+                if (prev === "dense") return "labels";
+                return "latest";
+            });
+        },
+        onScrollUp: () => {
+            setMode(prev => {
+                if (prev === "labels") return "dense";
+                if (prev === "dense") return "latest";
+                return "labels";
+            });
+        },
+    });
 
     useEffect(() => {
         const id = setInterval(() => setAngle(a => (a + 0.02) % (Math.PI * 2)), 60);
