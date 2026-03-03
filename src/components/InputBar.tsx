@@ -73,6 +73,46 @@ export const InputBar: React.FC<InputBarProps> = ({
     setMentionIndex(0);
   };
 
+  const moveWordLeft = (text: string, pos: number): number => {
+    if (pos <= 0) return 0;
+    const before = text.slice(0, pos);
+    const match = before.match(/(\w+\W*|\W+)$/);
+    if (!match) return 0;
+    return Math.max(0, pos - match[0].length);
+  };
+
+  const moveWordRight = (text: string, pos: number): number => {
+    if (pos >= text.length) return text.length;
+    const after = text.slice(pos);
+    const match = after.match(/^(\W*\w+|\W+)/);
+    if (!match) return text.length;
+    return Math.min(text.length, pos + match[0].length);
+  };
+
+  const deleteWordBackward = (text: string, pos: number): { value: string; cursor: number } => {
+    if (pos <= 0) return { value: text, cursor: pos };
+    const nextPos = moveWordLeft(text, pos);
+    return {
+      value: text.slice(0, nextPos) + text.slice(pos),
+      cursor: nextPos,
+    };
+  };
+
+  const deleteWordForward = (text: string, pos: number): { value: string; cursor: number } => {
+    if (pos >= text.length) return { value: text, cursor: pos };
+    const nextPos = moveWordRight(text, pos);
+    return {
+      value: text.slice(0, pos) + text.slice(nextPos),
+      cursor: pos,
+    };
+  };
+
+  const isCtrlKey = (inputChar: string, key: string): boolean => {
+    if (inputChar === key) return true;
+    const code = key.toLowerCase().charCodeAt(0) - 96;
+    return inputChar.length === 1 && inputChar.charCodeAt(0) === code;
+  };
+
   useInput((rawInput, key) => {
     if (!isActive) return;
 
@@ -102,6 +142,7 @@ export const InputBar: React.FC<InputBarProps> = ({
 
     const mentionSuggestions = mentionContext?.suggestions ?? [];
     const hasMentionSuggestions = mentionSuggestions.length > 0;
+    const keyAny = key as { home?: boolean; end?: boolean };
 
     if (key.return) {
       if (hasMentionSuggestions) {
@@ -117,31 +158,62 @@ export const InputBar: React.FC<InputBarProps> = ({
         setMentionIndex(0);
       }
     } else if (key.leftArrow) {
-      if (key.ctrl) {
-        // Jump word left
-        const before = input.slice(0, cursorOffset);
-        const match = before.match(/(\w+\W*|\W+)$/);
-        if (match) {
-          setCursorOffset((prev) => Math.max(0, prev - match[0].length));
-        } else {
-          setCursorOffset(0);
-        }
+      if (key.ctrl || key.meta) {
+        setCursorOffset((prev) => moveWordLeft(input, prev));
       } else {
         setCursorOffset((prev) => Math.max(0, prev - 1));
       }
     } else if (key.rightArrow) {
-      if (key.ctrl) {
-        // Jump word right
-        const after = input.slice(cursorOffset);
-        const match = after.match(/^(\W*\w+|\W+)/);
-        if (match) {
-          setCursorOffset((prev) => Math.min(input.length, prev + match[0].length));
-        } else {
-          setCursorOffset(input.length);
-        }
+      if (key.ctrl || key.meta) {
+        setCursorOffset((prev) => moveWordRight(input, prev));
       } else {
         setCursorOffset((prev) => Math.min(input.length, prev + 1));
       }
+    } else if (keyAny.home || (key.ctrl && isCtrlKey(char, "a"))) {
+      setCursorOffset(0);
+    } else if (keyAny.end || (key.ctrl && isCtrlKey(char, "e"))) {
+      setCursorOffset(input.length);
+    } else if (key.ctrl && isCtrlKey(char, "u")) {
+      // Kill from line start to cursor (bash/readline style)
+      const nextInput = input.slice(cursorOffset);
+      setInput(nextInput);
+      setCursorOffset(0);
+      if (nextInput === "") setCommandMode(false);
+      setHistoryIndex(-1);
+    } else if (key.ctrl && isCtrlKey(char, "k")) {
+      // Kill from cursor to line end (bash/readline style)
+      const nextInput = input.slice(0, cursorOffset);
+      setInput(nextInput);
+      if (nextInput === "") setCommandMode(false);
+      setHistoryIndex(-1);
+    } else if (key.ctrl && isCtrlKey(char, "l")) {
+      // Clear entire line input
+      setInput("");
+      setCursorOffset(0);
+      setCommandMode(false);
+      setHistoryIndex(-1);
+      setMentionIndex(0);
+    } else if (key.ctrl && isCtrlKey(char, "d")) {
+      // Delete character under cursor
+      if (cursorOffset < input.length) {
+        const nextInput = input.slice(0, cursorOffset) + input.slice(cursorOffset + 1);
+        setInput(nextInput);
+        if (nextInput === "") setCommandMode(false);
+        setHistoryIndex(-1);
+      }
+    } else if (char === "d" && key.meta) {
+      // Delete word forward (alt+d)
+      const next = deleteWordForward(input, cursorOffset);
+      setInput(next.value);
+      setCursorOffset(next.cursor);
+      if (next.value === "") setCommandMode(false);
+      setHistoryIndex(-1);
+    } else if (char === "b" && key.meta) {
+      // Move word backward (alt+b)
+      setCursorOffset((prev) => moveWordLeft(input, prev));
+    } else if (char === "f" && key.meta) {
+      // Move word forward (alt+f)
+      setCursorOffset((prev) => moveWordRight(input, prev));
     } else if (key.tab) {
       if (hasMentionSuggestions) {
         applyMention(mentionSuggestions[Math.min(mentionIndex, mentionSuggestions.length - 1)]);
@@ -185,34 +257,33 @@ export const InputBar: React.FC<InputBarProps> = ({
         setCursorOffset(0);
         setCommandMode(false);
       }
+    } else if ((key.backspace && (key.meta || key.ctrl)) || (char === "\x7F" && key.meta)) {
+      // Delete word backward (alt+backspace / ctrl+backspace)
+      const next = deleteWordBackward(input, cursorOffset);
+      setInput(next.value);
+      setCursorOffset(next.cursor);
+      if (next.value === "") setCommandMode(false);
+      setHistoryIndex(-1);
     } else if (key.backspace || key.delete) {
-      if (cursorOffset > 0) {
+      if (key.delete && !key.backspace && cursorOffset < input.length) {
+        // Forward delete
+        const nextInput = input.slice(0, cursorOffset) + input.slice(cursorOffset + 1);
+        setInput(nextInput);
+        if (nextInput === "") setCommandMode(false);
+      } else if (cursorOffset > 0) {
+        // Backward delete
         const nextInput = input.slice(0, cursorOffset - 1) + input.slice(cursorOffset);
         setInput(nextInput);
         setCursorOffset((prev) => prev - 1);
         if (nextInput === "") setCommandMode(false);
       }
       setHistoryIndex(-1);
-    } else if (char === "w" && key.ctrl) {
-      // Delete word backward
-      if (cursorOffset > 0) {
-        const before = input.slice(0, cursorOffset);
-        const match = before.match(/(\w+\W*|\W+)$/);
-        if (match) {
-          const deleteLen = match[0].length;
-          const nextInput = input.slice(0, cursorOffset - deleteLen) + input.slice(cursorOffset);
-          setInput(nextInput);
-          setCursorOffset(prev => Math.max(0, prev - deleteLen));
-          if (nextInput === "") setCommandMode(false);
-        }
-      }
+    } else if (key.ctrl && isCtrlKey(char, "w")) {
+      const next = deleteWordBackward(input, cursorOffset);
+      setInput(next.value);
+      setCursorOffset(next.cursor);
+      if (next.value === "") setCommandMode(false);
       setHistoryIndex(-1);
-    } else if (char === "a" && key.ctrl) {
-      // Home
-      setCursorOffset(0);
-    } else if (char === "e" && key.ctrl) {
-      // End
-      setCursorOffset(input.length);
     } else if (char) {
       // Allow pasting multiple characters correctly and normal typing
       // Filter out raw control characters
