@@ -388,7 +388,8 @@ const App: React.FC = () => {
 
     try {
       const buildModelInputWithNotes = async (rawInput: string): Promise<string> => {
-        const mentionMatches = [...rawInput.matchAll(/(?:^|\s)@([a-zA-Z0-9._-]+)/g)];
+        const mentionRegex = /(^|\s)@([a-zA-Z0-9._-]+)/g;
+        const mentionMatches = [...rawInput.matchAll(mentionRegex)];
         if (mentionMatches.length === 0) return rawInput;
 
         const files = await notepadService.listFiles();
@@ -399,27 +400,60 @@ const App: React.FC = () => {
           fileByAlias.set(f.replace(/\.(txt|md)$/i, "").toLowerCase(), f);
         }
 
-        const orderedAliases: string[] = [];
-        const seen = new Set<string>();
+        const resolveAlias = (aliasRaw: string): string | null => {
+          const alias = aliasRaw.toLowerCase();
+          const exact = fileByAlias.get(alias) || fileByAlias.get(`${alias}.txt`) || fileByAlias.get(`${alias}.md`);
+          if (exact) return exact;
+
+          const startsWith = files.find((f) => {
+            const lower = f.toLowerCase();
+            return lower.startsWith(`${alias}.`) || lower.startsWith(alias);
+          });
+          if (startsWith) return startsWith;
+
+          const contains = files.find((f) => f.toLowerCase().includes(alias));
+          return contains || null;
+        };
+
+        const resolvedByAlias = new Map<string, string>();
         for (const match of mentionMatches) {
-          const alias = (match[1] || "").toLowerCase();
-          if (alias && !seen.has(alias)) {
-            seen.add(alias);
-            orderedAliases.push(alias);
+          const aliasRaw = (match[2] || "").trim();
+          if (!aliasRaw) continue;
+          if (!resolvedByAlias.has(aliasRaw)) {
+            const resolved = resolveAlias(aliasRaw);
+            if (resolved) resolvedByAlias.set(aliasRaw, resolved);
+          }
+        }
+
+        const rewrittenInput = rawInput.replace(mentionRegex, (full, leadingWs: string, aliasRaw: string) => {
+          const resolved = resolvedByAlias.get(aliasRaw);
+          if (!resolved) return full;
+          return `${leadingWs}${resolved}`;
+        });
+
+        const orderedFiles: string[] = [];
+        const seenFiles = new Set<string>();
+        for (const match of mentionMatches) {
+          const aliasRaw = (match[2] || "").trim();
+          const resolved = resolvedByAlias.get(aliasRaw);
+          if (resolved && !seenFiles.has(resolved)) {
+            seenFiles.add(resolved);
+            orderedFiles.push(resolved);
           }
         }
 
         const blocks: string[] = [];
-        for (const alias of orderedAliases) {
-          const filename = fileByAlias.get(alias) || fileByAlias.get(`${alias}.txt`) || fileByAlias.get(`${alias}.md`);
-          if (!filename) continue;
+        for (const filename of orderedFiles) {
           const content = await notepadService.readFileContent(filename);
           if (content === null) continue;
           blocks.push(`[${filename}]\n${content || "(empty file)"}`);
         }
 
-        if (blocks.length === 0) return rawInput;
-        return `${rawInput}\n\nReferenced notes context:\n${blocks.join("\n\n")}`;
+        if (blocks.length === 0) return rewrittenInput;
+        return `${rewrittenInput}
+
+Referenced notes context (auto-included from @mentions; avoid re-reading these files with tools):
+${blocks.join("\n\n")}`;
       };
 
       const modelInput = await buildModelInputWithNotes(input);
