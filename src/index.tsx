@@ -335,9 +335,45 @@ const App: React.FC = () => {
     setLoadingLabel("Thinking...");
 
     try {
+      const buildModelInputWithNotes = async (rawInput: string): Promise<string> => {
+        const mentionMatches = [...rawInput.matchAll(/(?:^|\s)@([a-zA-Z0-9._-]+)/g)];
+        if (mentionMatches.length === 0) return rawInput;
+
+        const files = await notepadService.listFiles();
+        const fileByAlias = new Map<string, string>();
+        for (const f of files) {
+          const lower = f.toLowerCase();
+          fileByAlias.set(lower, f);
+          fileByAlias.set(f.replace(/\.(txt|md)$/i, "").toLowerCase(), f);
+        }
+
+        const orderedAliases: string[] = [];
+        const seen = new Set<string>();
+        for (const match of mentionMatches) {
+          const alias = (match[1] || "").toLowerCase();
+          if (alias && !seen.has(alias)) {
+            seen.add(alias);
+            orderedAliases.push(alias);
+          }
+        }
+
+        const blocks: string[] = [];
+        for (const alias of orderedAliases) {
+          const filename = fileByAlias.get(alias) || fileByAlias.get(`${alias}.txt`) || fileByAlias.get(`${alias}.md`);
+          if (!filename) continue;
+          const content = await notepadService.readFileContent(filename);
+          if (content === null) continue;
+          blocks.push(`[${filename}]\n${content || "(empty file)"}`);
+        }
+
+        if (blocks.length === 0) return rawInput;
+        return `${rawInput}\n\nReferenced notes context:\n${blocks.join("\n\n")}`;
+      };
+
+      const modelInput = await buildModelInputWithNotes(input);
       // *** Use ref to always get the CURRENT session ID ***
       const sid = sessionIdRef.current || undefined;
-      const generator = runAgentLoop(input, conversationHistory.current, sid);
+      const generator = runAgentLoop(modelInput, conversationHistory.current, sid);
 
       for await (const chunk of generator) {
         if (chunk.type === "text") {

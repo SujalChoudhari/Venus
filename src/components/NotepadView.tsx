@@ -13,6 +13,14 @@ interface Pos {
     y: number;
 }
 
+const clampPos = (pos: Pos, rows: string[]): Pos => {
+    const maxY = Math.max(0, rows.length - 1);
+    const y = Math.max(0, Math.min(maxY, pos.y));
+    const lineLen = rows[y]?.length || 0;
+    const x = Math.max(0, Math.min(lineLen, pos.x));
+    return { x, y };
+};
+
 export const NotepadView: React.FC<NotepadViewProps> = ({ mode = "CHAT" }) => {
     const { stdout } = useStdout();
     // Micro UI reserves 1 line for tabs, 1 line for status bar, 1 line for hints = 3 lines.
@@ -54,6 +62,20 @@ export const NotepadView: React.FC<NotepadViewProps> = ({ mode = "CHAT" }) => {
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [activeTabIdx, tabs]);
+
+    useEffect(() => {
+        const clampedCursor = clampPos(cursor, lines);
+        if (clampedCursor.x !== cursor.x || clampedCursor.y !== cursor.y) {
+            setCursor(clampedCursor);
+            setPreferredX(clampedCursor.x);
+        }
+        if (selectionAnchor) {
+            const clampedAnchor = clampPos(selectionAnchor, lines);
+            if (clampedAnchor.x !== selectionAnchor.x || clampedAnchor.y !== selectionAnchor.y) {
+                setSelectionAnchor(clampedAnchor);
+            }
+        }
+    }, [content]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Async Load Synchronization
     // If NotepadView mounts immediately on boot, init() might still be loading scratchpad.txt
@@ -99,8 +121,8 @@ export const NotepadView: React.FC<NotepadViewProps> = ({ mode = "CHAT" }) => {
     // --- Editor Math & Selections ---
     const getSelectionBounds = () => {
         if (!selectionAnchor) return null;
-        const c = cursor;
-        const s = selectionAnchor;
+        const c = clampPos(cursor, lines);
+        const s = clampPos(selectionAnchor, lines);
         if (c.y < s.y || (c.y === s.y && c.x < s.x)) {
             return { start: c, end: s };
         }
@@ -122,6 +144,7 @@ export const NotepadView: React.FC<NotepadViewProps> = ({ mode = "CHAT" }) => {
         const bounds = getSelectionBounds();
         if (!bounds) return "";
         const { start, end } = bounds;
+        if (!lines[start.y] || !lines[end.y]) return "";
         if (start.y === end.y) return lines[start.y].slice(start.x, end.x);
         let text = lines[start.y].slice(start.x) + "\n";
         for (let i = start.y + 1; i < end.y; i++) text += lines[i] + "\n";
@@ -134,6 +157,7 @@ export const NotepadView: React.FC<NotepadViewProps> = ({ mode = "CHAT" }) => {
         if (!bounds) return null;
         const currentLines = [...lines];
         const { start, end } = bounds;
+        if (!currentLines[start.y] || !currentLines[end.y]) return null;
         currentLines[start.y] = currentLines[start.y].slice(0, start.x) + currentLines[end.y].slice(end.x);
         currentLines.splice(start.y + 1, end.y - start.y);
         return { newLines: currentLines, newCursor: start };
@@ -234,6 +258,19 @@ export const NotepadView: React.FC<NotepadViewProps> = ({ mode = "CHAT" }) => {
                 }
                 return;
             }
+            if (input === "n") {
+                const filename = await notepadService.createNote("untitled.txt");
+                if (activeTab?.isDirty) await notepadService.save();
+                await notepadService.load(filename);
+                const newState = notepadService.getState();
+                setTabs((prev) => [...prev, newState]);
+                setActiveTabIdx(tabs.length);
+                setSelectionAnchor(null);
+                setScrollOffset(0);
+                setCursor({ x: 0, y: 0 });
+                setPreferredX(0);
+                return;
+            }
             if (input === "o") {
                 const list = await notepadService.listFiles();
                 setFileList(list);
@@ -242,11 +279,29 @@ export const NotepadView: React.FC<NotepadViewProps> = ({ mode = "CHAT" }) => {
                 return;
             }
             if (input === "z") { // Undo
-                if (notepadService.undo()) setContent(notepadService.getState().content);
+                if (notepadService.undo()) {
+                    const newState = notepadService.getState();
+                    setContent(newState.content);
+                    setTabs((prev) => {
+                        const next = [...prev];
+                        if (next[activeTabIdx]) next[activeTabIdx] = { ...next[activeTabIdx], content: newState.content, isDirty: true };
+                        return next;
+                    });
+                    setSelectionAnchor(null);
+                }
                 return;
             }
             if (input === "y" || input === "r") { // Redo
-                if (notepadService.redo()) setContent(notepadService.getState().content);
+                if (notepadService.redo()) {
+                    const newState = notepadService.getState();
+                    setContent(newState.content);
+                    setTabs((prev) => {
+                        const next = [...prev];
+                        if (next[activeTabIdx]) next[activeTabIdx] = { ...next[activeTabIdx], content: newState.content, isDirty: true };
+                        return next;
+                    });
+                    setSelectionAnchor(null);
+                }
                 return;
             }
             if (input === "c") { // Copy
@@ -295,8 +350,10 @@ export const NotepadView: React.FC<NotepadViewProps> = ({ mode = "CHAT" }) => {
                 return;
             }
             if (input === "a") { // Select All
+                const endY = Math.max(0, lines.length - 1);
+                const endX = lines[endY]?.length || 0;
                 setSelectionAnchor({ x: 0, y: 0 });
-                handleMove(lines[lines.length - 1].length, lines.length - 1, true);
+                handleMove(endX, endY, true);
                 return;
             }
             if (input === "e") { // Was End, remove this or keep it as alternative
@@ -538,7 +595,7 @@ export const NotepadView: React.FC<NotepadViewProps> = ({ mode = "CHAT" }) => {
             {/* 4. Helper/Hint Bar */}
             <Box flexDirection="row" paddingX={1} flexShrink={0}>
                 <Text color={Theme.colors.text.muted} italic>
-                    ^S Save | ^O Open | ^Q Close Tab | ^C/^V Copy/Paste | ^Z Undo | ^A/^E Home/End
+                    ^S Save | ^N New | ^O Open | ^Q Close Tab | ^C/^V Copy/Paste | ^Z Undo | ^A/^E Home/End
                 </Text>
             </Box>
         </Box>

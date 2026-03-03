@@ -21,6 +21,7 @@ class NotepadService {
     private undoStack: string[] = [];
     private redoStack: string[] = [];
     private internalClipboard: string = "";
+    private readonly allowedExts = [".txt", ".md"];
 
     async init() {
         try {
@@ -101,22 +102,68 @@ class NotepadService {
         this.state.isDirty = false;
     }
 
+    normalizeFilename(name: string): string {
+        const trimmed = name.trim().replace(/[\\/:*?"<>|]/g, "-");
+        if (!trimmed) return "untitled.txt";
+        if (this.allowedExts.some((ext) => trimmed.toLowerCase().endsWith(ext))) {
+            return trimmed;
+        }
+        return `${trimmed}.txt`;
+    }
+
+    async createNote(preferredName?: string): Promise<string> {
+        const existing = new Set(await this.listFiles());
+        const desired = this.normalizeFilename(preferredName || "untitled.txt");
+        if (!existing.has(desired)) {
+            await writeFile(join(this.notesDir, desired), "", "utf8");
+            return desired;
+        }
+
+        const dotIdx = desired.lastIndexOf(".");
+        const base = dotIdx > -1 ? desired.slice(0, dotIdx) : desired;
+        const ext = dotIdx > -1 ? desired.slice(dotIdx) : ".txt";
+        let i = 1;
+        while (i < 10000) {
+            const candidate = `${base}-${i}${ext}`;
+            if (!existing.has(candidate)) {
+                await writeFile(join(this.notesDir, candidate), "", "utf8");
+                return candidate;
+            }
+            i += 1;
+        }
+        throw new Error("Unable to create unique note filename");
+    }
+
+    async readFileContent(filename: string): Promise<string | null> {
+        const safeName = this.normalizeFilename(filename);
+        if (!this.allowedExts.some((ext) => safeName.toLowerCase().endsWith(ext))) return null;
+        const fullPath = join(this.notesDir, safeName);
+        try {
+            return await readFile(fullPath, "utf8");
+        } catch {
+            return null;
+        }
+    }
+
     async load(filename: string) {
-        const fullPath = join(this.notesDir, filename);
+        const safeName = this.normalizeFilename(filename);
+        const fullPath = join(this.notesDir, safeName);
         this.undoStack = [];
         this.redoStack = [];
         try {
             const content = await readFile(fullPath, "utf8");
-            this.state = { filename, content, isDirty: false };
+            this.state = { filename: safeName, content, isDirty: false };
         } catch (e) {
-            this.state = { filename, content: "", isDirty: false };
+            this.state = { filename: safeName, content: "", isDirty: false };
         }
     }
 
     async listFiles(): Promise<string[]> {
         try {
             const files = await readdir(this.notesDir);
-            return files.filter(f => f.endsWith('.txt') || f.endsWith('.md'));
+            return files
+                .filter((f) => this.allowedExts.some((ext) => f.toLowerCase().endsWith(ext)))
+                .sort((a, b) => a.localeCompare(b));
         } catch (e) {
             return [];
         }
@@ -124,7 +171,8 @@ class NotepadService {
 
     async deleteFile(filename: string) {
         try {
-            const fullPath = join(this.notesDir, filename);
+            const safeName = this.normalizeFilename(filename);
+            const fullPath = join(this.notesDir, safeName);
             await unlink(fullPath);
         } catch (e) {
             // Ignore if file doesn't exist

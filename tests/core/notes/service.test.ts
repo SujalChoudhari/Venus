@@ -99,6 +99,21 @@ describe("notepad service", () => {
     expect(notepadService.getState().content).toBe("");
   });
 
+  it("creates unique notes and reads file content without mutating state", async () => {
+    const created = await notepadService.createNote("scratchpad");
+    expect(created).toBe("scratchpad.txt");
+    expect((await notepadService.listFiles()).includes("scratchpad.txt")).toBe(true);
+
+    const second = await notepadService.createNote("scratchpad.txt");
+    expect(second).toBe("scratchpad-1.txt");
+
+    await writeFile(join(fixedNotesDir, "alpha.md"), "alpha-body", "utf8");
+    const before = notepadService.getState().filename;
+    const mdContent = await notepadService.readFileContent("alpha.md");
+    expect(mdContent).toBe("alpha-body");
+    expect(notepadService.getState().filename).toBe(before);
+  });
+
   afterAll(async () => {
     mock.restore();
     await rm(fixedNotesDir, { recursive: true, force: true });
