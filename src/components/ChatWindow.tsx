@@ -16,6 +16,7 @@ export interface Message {
 interface ChatWindowProps {
   messages: Message[];
   isStreaming?: boolean;
+  isActive?: boolean;
 }
 
 function safeTime(ts: unknown): string {
@@ -141,6 +142,7 @@ const MessageRow: React.FC<{ msg: Message; isLast: boolean; isStreaming: boolean
 export const ChatWindow: React.FC<ChatWindowProps> = ({
   messages,
   isStreaming = false,
+  isActive = true,
 }) => {
   const { stdout } = useStdout();
   const termHeight = stdout?.rows ?? 40;
@@ -271,10 +273,10 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     } else if (key.ctrl && key.downArrow) {
       setScrollLineOffset(Math.max(0, messageLineStats.totalLines - availableLines));
     }
-  });
+  }, { isActive });
 
   useMouseScroll({
-    isActive: true, // Activity managed by ViewSwitcher hiding/showing ChatWindow
+    isActive,
     onScrollUp: () => setScrollLineOffset((prev) => Math.max(0, prev - 2)),
     onScrollDown: () => setScrollLineOffset((prev) => Math.min(Math.max(0, messageLineStats.totalLines - availableLines), prev + 2))
   });

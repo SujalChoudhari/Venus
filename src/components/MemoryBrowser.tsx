@@ -12,9 +12,10 @@ interface MemoryItem {
 
 interface MemoryBrowserProps {
     memories: MemoryItem[];
+    appMode?: "CHAT" | "COMMAND" | "INSERT";
 }
 
-export const MemoryBrowser: React.FC<MemoryBrowserProps> = ({ memories }) => {
+export const MemoryBrowser: React.FC<MemoryBrowserProps> = ({ memories, appMode = "CHAT" }) => {
     const { stdout } = useStdout();
     const termHeight = stdout?.rows ?? 40;
     const pageSize = Math.max(3, Math.floor((termHeight - 10) / 3));
@@ -50,7 +51,7 @@ export const MemoryBrowser: React.FC<MemoryBrowserProps> = ({ memories }) => {
         } else if (key.pageDown || (key.shift && key.downArrow)) {
             setScrollOffset(prev => Math.max(0, prev - pageSize));
         }
-    });
+    }, { isActive: appMode !== "CHAT" });
 
     // Visible slice (from end, scrollOffset pushes up)
     const endIdx = allItems.length - scrollOffset;

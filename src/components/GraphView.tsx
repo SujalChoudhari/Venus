@@ -43,6 +43,7 @@ export const GraphView: React.FC<GraphViewProps> = ({ appMode = "CHAT" }) => {
     const [angle, setAngle] = useState(0);
     const [mode, setMode] = useState<"latest" | "dense" | "labels">("latest");
     const tilt = 0.2;
+    const isInteractive = appMode !== "CHAT";
 
     const cx = Math.floor(W / 2);
     const cy = Math.floor(H / 2);
@@ -77,7 +78,7 @@ export const GraphView: React.FC<GraphViewProps> = ({ appMode = "CHAT" }) => {
                 return "latest";
             });
         }
-    });
+    }, { isActive: isInteractive });
 
     useEffect(() => {
         const id = setInterval(() => setAngle(a => (a + 0.02) % (Math.PI * 2)), 60);

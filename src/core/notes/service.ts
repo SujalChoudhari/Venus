@@ -11,6 +11,10 @@ export interface NoteState {
 }
 
 class NotepadService {
+    private normalizeLineEndings(text: string): string {
+        return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    }
+
     private state: NoteState = {
         filename: "scratchpad.txt",
         content: "Welcome to Venus Notepad!\n\nThis is your private space for thoughts.\n- Type anywhere\n- Ctrl+S to save\n- Shift+Up/Down to scroll\n",
@@ -68,11 +72,12 @@ class NotepadService {
     }
 
     updateContent(content: string, skipHistory: boolean = false) {
-        if (this.state.content !== content) {
+        const normalized = this.normalizeLineEndings(content);
+        if (this.state.content !== normalized) {
             if (!skipHistory) {
                 this.pushHistory(this.state.content);
             }
-            this.state.content = content;
+            this.state.content = normalized;
             this.state.isDirty = true;
         }
     }
@@ -168,7 +173,8 @@ class NotepadService {
         const fullPath = await this.resolveReadablePath(safeName);
         if (!fullPath) return null;
         try {
-            return await readFile(fullPath, "utf8");
+            const text = await readFile(fullPath, "utf8");
+            return this.normalizeLineEndings(text);
         } catch {
             return null;
         }
@@ -181,7 +187,7 @@ class NotepadService {
         this.redoStack = [];
         try {
             if (!fullPath) throw new Error("missing");
-            const content = await readFile(fullPath, "utf8");
+            const content = this.normalizeLineEndings(await readFile(fullPath, "utf8"));
             this.state = { filename: safeName, content, isDirty: false };
         } catch (e) {
             this.state = { filename: safeName, content: "", isDirty: false };

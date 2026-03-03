@@ -59,6 +59,8 @@ const toUiMessage = (m: ChatMessage): Message => ({
   type: m.type,
 });
 
+const isEditableView = (view: ViewId): boolean => view === "notes" || view === "config";
+
 const App: React.FC = () => {
   const { stdout } = useStdout();
   const { exit } = useApp();
@@ -110,7 +112,10 @@ const App: React.FC = () => {
     return input === normalized;
   };
 
-  // Modal Switching Logic (Vim-style 3-mode)
+  // Modal switching logic:
+  // - modeCycle toggles CHAT <-> COMMAND
+  // - INSERT is entered explicitly from COMMAND on editable views
+  // - Escape is always a reliable "back" key (INSERT -> COMMAND -> CHAT)
   useInput((input, key) => {
     if (key.ctrl && input === "c") {
       if (appMode !== "INSERT" && activeView !== "notes") {
@@ -120,20 +125,28 @@ const App: React.FC = () => {
       return;
     }
 
+    if (key.escape) {
+      if (appMode === "INSERT") {
+        setAppMode("COMMAND");
+        return;
+      }
+      if (appMode === "COMMAND") {
+        setAppMode("CHAT");
+        return;
+      }
+    }
+
     if (matchesShortcut(input, key, settings.shortcuts.modeCycle)) {
-      setAppMode(prev => {
-        if (prev === "CHAT") return "COMMAND";
-        if (prev === "COMMAND") {
-          setActiveView("notes");
-          return "INSERT";
-        }
-        setActiveView("dashboard");
-        return "CHAT";
-      });
+      setAppMode(prev => (prev === "CHAT" ? "COMMAND" : "CHAT"));
       return;
     }
 
     if (appMode === "COMMAND") {
+      if ((input === "i" || key.return) && isEditableView(activeView)) {
+        setAppMode("INSERT");
+        return;
+      }
+
       for (const view of VIEW_ORDER) {
         const hotkey = settings.shortcuts.commandViewHotkeys[view];
         if (hotkey && matchesShortcut(input, key, hotkey)) {
@@ -496,16 +509,19 @@ const App: React.FC = () => {
   // Determine height budget for chat window
   // termHeight - TopBar(2) - Footer(5ish) - Border(2)
   const mainHeight = Math.max(10, termHeight - 7);
+  const mainAreaHeight = (activeView === "notes" || appMode === "INSERT") ? termHeight - 8 : mainHeight;
+  const showSidebar = !settings.ui.hideSidebarInNotes || (activeView !== "notes" && appMode !== "INSERT");
+  const centerPanelWidth = Math.max(20, termWidth - (showSidebar ? sidebarWidth : 0));
 
   // Determine what goes in the center panel
   const renderCenterPanel = () => {
     switch (activeView) {
-      case "memory": return <MemoryBrowser memories={getMemoriesForBrowser()} />;
+      case "memory": return <MemoryBrowser memories={getMemoriesForBrowser()} appMode={appMode} />;
       case "tools": return <ToolLog entries={toolActivities} />;
-      case "notes": return <NotepadView mode={appMode} />;
+      case "notes": return <NotepadView mode={appMode} panelWidth={centerPanelWidth} panelHeight={mainAreaHeight} />;
       case "mcp": return <McpManagerView />;
       case "graph": return <GraphView appMode={appMode} />;
-      case "config": return <ConfigPanel mode={appMode} configPath={getSettingsPath()} />;
+      case "config": return <ConfigPanel mode={appMode} configPath={getSettingsPath()} panelWidth={centerPanelWidth} panelHeight={mainAreaHeight} />;
 
       case "dashboard":
       default:
@@ -519,7 +535,7 @@ const App: React.FC = () => {
               <Text color={Theme.colors.secondary}>┐</Text>
             </Box>
             <Box borderStyle="single" borderTop={false} borderColor={Theme.colors.secondary} flexGrow={1} overflow="hidden">
-              <ChatWindow messages={messages} isStreaming={isLoading} />
+              <ChatWindow messages={messages} isStreaming={isLoading} isActive={appMode === "CHAT"} />
             </Box>
           </Box>
         );
@@ -540,14 +556,14 @@ const App: React.FC = () => {
       </Box>
 
       {/* Main area: center + sidebar — Sidebar hides in notes/insert mode for focus */}
-      <Box flexDirection="row" flexGrow={1} flexBasis={0} overflow="hidden" height={(activeView === "notes" || appMode === "INSERT") ? termHeight - 8 : mainHeight}>
+      <Box flexDirection="row" flexGrow={1} flexBasis={0} overflow="hidden" height={mainAreaHeight}>
         {/* Center panel */}
         <Box flexDirection="column" flexGrow={1} flexBasis={0} overflow="hidden" >
           {renderCenterPanel()}
         </Box>
 
         {/* Sidebar — configurable visibility */}
-        {(!settings.ui.hideSidebarInNotes || (activeView !== "notes" && appMode !== "INSERT")) && (
+        {showSidebar && (
           <Box flexDirection="column" width={sidebarWidth} flexShrink={0} height={mainHeight}>
             {settings.ui.showKnowledgeGraphPanel && <KnowledgeGraphPanel panelWidth={sidebarWidth} />}
             {settings.ui.showActivityPanel && <ActivityPanel activities={toolActivities} />}
@@ -573,8 +589,8 @@ const App: React.FC = () => {
             {appMode === "CHAT"
               ? `${settings.shortcuts.modeCycle}: command mode  •  `
               : appMode === "COMMAND"
-                ? `${settings.shortcuts.modeCycle}: insert mode  •  `
-                : `${settings.shortcuts.modeCycle}: chat mode  •  `}
+                ? `i/enter: edit (notes/config)  •  esc: chat mode  •  `
+                : `esc: command mode  •  `}
             {`views: ${Object.keys(settings.shortcuts.commandViewHotkeys).length} hotkeys  •  ${settings.shortcuts.commandNextView}: next view  •  ↑↓ history`}
           </Text>
           <Text color={Theme.colors.text.muted} dimColor>

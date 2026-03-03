@@ -6,12 +6,16 @@ import { useMouseScroll } from "../core/hooks/useMouseScroll";
 
 interface NotepadViewProps {
     mode?: "CHAT" | "COMMAND" | "INSERT";
+    panelWidth?: number;
+    panelHeight?: number;
 }
 
 interface Pos {
     x: number;
     y: number;
 }
+
+const normalizeLineEndings = (text: string): string => text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 
 const clampPos = (pos: Pos, rows: string[]): Pos => {
     const maxY = Math.max(0, rows.length - 1);
@@ -21,12 +25,14 @@ const clampPos = (pos: Pos, rows: string[]): Pos => {
     return { x, y };
 };
 
-export const NotepadView: React.FC<NotepadViewProps> = ({ mode = "CHAT" }) => {
+export const NotepadView: React.FC<NotepadViewProps> = ({ mode = "CHAT", panelWidth, panelHeight }) => {
     const { stdout } = useStdout();
     // Micro UI reserves 1 line for tabs, 1 line for status bar, 1 line for hints = 3 lines.
-    // Plus any container borders from parent = another ~4 lines.
-    const termRows = (stdout?.rows ?? 24) - 7;
-    const termCols = (stdout?.columns ?? 80) - 8;
+    const editorHeight = panelHeight ?? ((stdout?.rows ?? 24) - 7);
+    const termRows = Math.max(1, editorHeight - 3);
+    const editorWidth = panelWidth ?? (stdout?.columns ?? 80);
+    const gutterWidth = 7; // " 9999 │ "
+    const viewportWidth = Math.max(1, editorWidth - gutterWidth - 1);
 
     const isInsert = mode === "INSERT";
     const isActive = mode === "COMMAND" || mode === "INSERT";
@@ -37,7 +43,7 @@ export const NotepadView: React.FC<NotepadViewProps> = ({ mode = "CHAT" }) => {
     const activeTab = tabs[activeTabIdx];
 
     // --- State: Editor Buffer ---
-    const [content, setContent] = useState(activeTab?.content || "");
+    const [content, setContent] = useState(normalizeLineEndings(activeTab?.content || ""));
     const lines = content.split("\n");
 
     // --- State: Cursor & View ---
@@ -54,7 +60,7 @@ export const NotepadView: React.FC<NotepadViewProps> = ({ mode = "CHAT" }) => {
     // Sync content when switching tabs
     useEffect(() => {
         if (activeTab && activeTab.content !== content) {
-            setContent(activeTab.content);
+            setContent(normalizeLineEndings(activeTab.content));
             setCursor({ x: 0, y: 0 });
             setPreferredX(0);
             setScrollOffset(0);
@@ -81,10 +87,11 @@ export const NotepadView: React.FC<NotepadViewProps> = ({ mode = "CHAT" }) => {
     // If NotepadView mounts immediately on boot, init() might still be loading scratchpad.txt
     useEffect(() => {
         const interval = setInterval(() => {
-            const currentState = notepadService.getState();
-            if (activeTabIdx === 0 && tabs.length === 1 && currentState.filename === "scratchpad.txt") {
-                if (currentState.content !== tabs[0].content) {
-                    setTabs([currentState]);
+                const currentState = notepadService.getState();
+                if (activeTabIdx === 0 && tabs.length === 1 && currentState.filename === "scratchpad.txt") {
+                const normalizedContent = normalizeLineEndings(currentState.content);
+                if (normalizedContent !== tabs[0].content) {
+                    setTabs([{ ...currentState, content: normalizedContent }]);
                 }
             }
         }, 500);
@@ -93,12 +100,13 @@ export const NotepadView: React.FC<NotepadViewProps> = ({ mode = "CHAT" }) => {
 
     // Update current buffer
     const updateContent = (newContent: string, newCursor?: Pos) => {
-        setContent(newContent);
-        notepadService.updateContent(newContent);
+        const normalized = normalizeLineEndings(newContent);
+        setContent(normalized);
+        notepadService.updateContent(normalized);
         setTabs((prev) => {
             const next = [...prev];
             if (next[activeTabIdx]) {
-                next[activeTabIdx] = { ...next[activeTabIdx], content: newContent, isDirty: true };
+                next[activeTabIdx] = { ...next[activeTabIdx], content: normalized, isDirty: true };
             }
             return next;
         });
@@ -176,6 +184,20 @@ export const NotepadView: React.FC<NotepadViewProps> = ({ mode = "CHAT" }) => {
         adjustScroll(newY);
     };
 
+    const findWordLeft = (line: string, x: number): number => {
+        let i = Math.max(0, Math.min(line.length, x));
+        while (i > 0 && /\s/.test(line[i - 1])) i--;
+        while (i > 0 && /\S/.test(line[i - 1])) i--;
+        return i;
+    };
+
+    const findWordRight = (line: string, x: number): number => {
+        let i = Math.max(0, Math.min(line.length, x));
+        while (i < line.length && /\s/.test(line[i])) i++;
+        while (i < line.length && /\S/.test(line[i])) i++;
+        return i;
+    };
+
     // --- Input Handling ---
     const swallowState = useRef(false);
 
@@ -206,6 +228,18 @@ export const NotepadView: React.FC<NotepadViewProps> = ({ mode = "CHAT" }) => {
             }
         }
 
+        const shiftHeld = !!key.shift || /\x1b\[[0-9;]*;[26][A-Za-z~]/.test(input);
+        const isHome = key.home || input === "\x1b[H" || input === "\x1b[1~" || input === "\x1bOH";
+        const isEnd = key.end || input === "\x1b[F" || input === "\x1b[4~" || input === "\x1bOF";
+        const isCtrlLeft = (key.ctrl && key.leftArrow) || input === "\x1b[1;5D" || input === "\x1b[5D";
+        const isCtrlRight = (key.ctrl && key.rightArrow) || input === "\x1b[1;5C" || input === "\x1b[5C";
+        const isCtrlUp = (key.ctrl && key.upArrow) || input === "\x1b[1;5A" || input === "\x1b[5A";
+        const isCtrlDown = (key.ctrl && key.downArrow) || input === "\x1b[1;5B" || input === "\x1b[5B";
+        const isCtrlHome = (key.ctrl && isHome) || input === "\x1b[1;5H" || input === "\x1b[7;5~";
+        const isCtrlEnd = (key.ctrl && isEnd) || input === "\x1b[1;5F" || input === "\x1b[8;5~";
+        const isCtrlDelete = (key.ctrl && key.delete) || input === "\x1b[3;5~";
+        const isCtrlBackspace = (key.ctrl && key.backspace) || input === "\x08";
+
         // --- File Switcher Overlay ---
         if (showFileSwitcher) {
             if (key.escape) {
@@ -221,7 +255,10 @@ export const NotepadView: React.FC<NotepadViewProps> = ({ mode = "CHAT" }) => {
                 if (filename) {
                     if (activeTab?.isDirty) await notepadService.save();
                     await notepadService.load(filename);
-                    const newState = notepadService.getState();
+                    const newState = {
+                        ...notepadService.getState(),
+                        content: normalizeLineEndings(notepadService.getState().content),
+                    };
                     const existingIdx = tabs.findIndex((t) => t.filename === filename);
                     if (existingIdx !== -1) {
                         setTabs((prev) => {
@@ -262,7 +299,10 @@ export const NotepadView: React.FC<NotepadViewProps> = ({ mode = "CHAT" }) => {
                 const filename = await notepadService.createNote("untitled.txt");
                 if (activeTab?.isDirty) await notepadService.save();
                 await notepadService.load(filename);
-                const newState = notepadService.getState();
+                const newState = {
+                    ...notepadService.getState(),
+                    content: normalizeLineEndings(notepadService.getState().content),
+                };
                 setTabs((prev) => [...prev, newState]);
                 setActiveTabIdx(tabs.length);
                 setSelectionAnchor(null);
@@ -281,10 +321,11 @@ export const NotepadView: React.FC<NotepadViewProps> = ({ mode = "CHAT" }) => {
             if (input === "z") { // Undo
                 if (notepadService.undo()) {
                     const newState = notepadService.getState();
-                    setContent(newState.content);
+                    const normalized = normalizeLineEndings(newState.content);
+                    setContent(normalized);
                     setTabs((prev) => {
                         const next = [...prev];
-                        if (next[activeTabIdx]) next[activeTabIdx] = { ...next[activeTabIdx], content: newState.content, isDirty: true };
+                        if (next[activeTabIdx]) next[activeTabIdx] = { ...next[activeTabIdx], content: normalized, isDirty: true };
                         return next;
                     });
                     setSelectionAnchor(null);
@@ -294,10 +335,11 @@ export const NotepadView: React.FC<NotepadViewProps> = ({ mode = "CHAT" }) => {
             if (input === "y" || input === "r") { // Redo
                 if (notepadService.redo()) {
                     const newState = notepadService.getState();
-                    setContent(newState.content);
+                    const normalized = normalizeLineEndings(newState.content);
+                    setContent(normalized);
                     setTabs((prev) => {
                         const next = [...prev];
-                        if (next[activeTabIdx]) next[activeTabIdx] = { ...next[activeTabIdx], content: newState.content, isDirty: true };
+                        if (next[activeTabIdx]) next[activeTabIdx] = { ...next[activeTabIdx], content: normalized, isDirty: true };
                         return next;
                     });
                     setSelectionAnchor(null);
@@ -357,31 +399,42 @@ export const NotepadView: React.FC<NotepadViewProps> = ({ mode = "CHAT" }) => {
                 return;
             }
             if (input === "e") { // Was End, remove this or keep it as alternative
-                handleMove(lines[cursor.y]?.length || 0, cursor.y, key.shift);
+                handleMove(lines[cursor.y]?.length || 0, cursor.y, shiftHeld);
                 return;
             }
-            if (key.leftArrow) { // Word jump left
+            if (isCtrlLeft) { // Word jump left
+                if (cursor.x > 0) {
+                    handleMove(findWordLeft(lines[cursor.y], cursor.x), cursor.y, shiftHeld);
+                } else if (cursor.y > 0) {
+                    handleMove(lines[cursor.y - 1].length, cursor.y - 1, shiftHeld);
+                }
+                return;
+            }
+            if (isCtrlRight) { // Word jump right
                 const line = lines[cursor.y];
-                const before = line.slice(0, cursor.x);
-                const match = before.match(/(\w+\W*|\W+)$/);
-                if (match) handleMove(Math.max(0, cursor.x - match[0].length), cursor.y, key.shift);
-                else if (cursor.y > 0) handleMove(lines[cursor.y - 1].length, cursor.y - 1, key.shift);
+                if (cursor.x < line.length) {
+                    handleMove(findWordRight(line, cursor.x), cursor.y, shiftHeld);
+                } else if (cursor.y < lines.length - 1) {
+                    handleMove(0, cursor.y + 1, shiftHeld);
+                }
                 return;
             }
-            if (key.rightArrow) { // Word jump right
-                const line = lines[cursor.y];
-                const after = line.slice(cursor.x);
-                const match = after.match(/^(\W*\w+|\W+)/);
-                if (match) handleMove(Math.min(line.length, cursor.x + match[0].length), cursor.y, key.shift);
-                else if (cursor.y < lines.length - 1) handleMove(0, cursor.y + 1, key.shift);
-                return;
-            }
-            if (key.upArrow) { // Scroll Up
+            if (isCtrlUp) { // Scroll Up
                 setScrollOffset((prev) => Math.max(0, prev - 1));
                 return;
             }
-            if (key.downArrow) { // Scroll Down
+            if (isCtrlDown) { // Scroll Down
                 setScrollOffset((prev) => Math.min(Math.max(0, lines.length - termRows), prev + 1));
+                return;
+            }
+            if (isCtrlHome) {
+                handleMove(0, 0, shiftHeld);
+                return;
+            }
+            if (isCtrlEnd) {
+                const lastY = Math.max(0, lines.length - 1);
+                const lastX = lines[lastY]?.length || 0;
+                handleMove(lastX, lastY, shiftHeld);
                 return;
             }
         }
@@ -390,42 +443,41 @@ export const NotepadView: React.FC<NotepadViewProps> = ({ mode = "CHAT" }) => {
         if (key.upArrow) {
             const newY = Math.max(0, cursor.y - 1);
             const lineLen = lines[newY]?.length || 0;
-            handleMove(Math.min(preferredX, lineLen), newY, key.shift, true);
+            handleMove(Math.min(preferredX, lineLen), newY, shiftHeld, true);
             return;
         }
         if (key.downArrow) {
             const newY = Math.min(lines.length - 1, cursor.y + 1);
             const lineLen = lines[newY]?.length || 0;
-            handleMove(Math.min(preferredX, lineLen), newY, key.shift, true);
+            handleMove(Math.min(preferredX, lineLen), newY, shiftHeld, true);
             return;
         }
         if (key.leftArrow) {
-            if (cursor.x > 0) handleMove(cursor.x - 1, cursor.y, key.shift);
-            else if (cursor.y > 0) handleMove(lines[cursor.y - 1].length, cursor.y - 1, key.shift);
+            if (cursor.x > 0) handleMove(cursor.x - 1, cursor.y, shiftHeld);
+            else if (cursor.y > 0) handleMove(lines[cursor.y - 1].length, cursor.y - 1, shiftHeld);
             return;
         }
         if (key.rightArrow) {
             const lineLen = lines[cursor.y]?.length || 0;
-            if (cursor.x < lineLen) handleMove(cursor.x + 1, cursor.y, key.shift);
-            else if (cursor.y < lines.length - 1) handleMove(0, cursor.y + 1, key.shift);
+            if (cursor.x < lineLen) handleMove(cursor.x + 1, cursor.y, shiftHeld);
+            else if (cursor.y < lines.length - 1) handleMove(0, cursor.y + 1, shiftHeld);
             return;
         }
         if (key.pageUp) {
-            handleMove(cursor.x, Math.max(0, cursor.y - termRows), key.shift);
+            handleMove(cursor.x, Math.max(0, cursor.y - termRows), shiftHeld);
             return;
         }
         if (key.pageDown) {
-            handleMove(cursor.x, Math.min(lines.length - 1, cursor.y + termRows), key.shift);
+            handleMove(cursor.x, Math.min(lines.length - 1, cursor.y + termRows), shiftHeld);
             return;
         }
 
-        // Home & End parsing (Ink doesn't strictly type these, but passes them in `key.name` or raw `input`)
-        if (key.home || input === '\x1b[H' || input === '\x1b[1~' || input === '\x1bOH') {
-            handleMove(0, cursor.y, key.shift);
+        if (isHome) {
+            handleMove(0, cursor.y, shiftHeld);
             return;
         }
-        if (key.end || input === '\x1b[F' || input === '\x1b[4~' || input === '\x1bOF') {
-            handleMove(lines[cursor.y]?.length || 0, cursor.y, key.shift);
+        if (isEnd) {
+            handleMove(lines[cursor.y]?.length || 0, cursor.y, shiftHeld);
             return;
         }
 
@@ -446,14 +498,39 @@ export const NotepadView: React.FC<NotepadViewProps> = ({ mode = "CHAT" }) => {
             newLines.splice(baseCur.y + 1, 0, line.substring(baseCur.x));
             updateContent(newLines.join("\n"), { x: 0, y: baseCur.y + 1 });
             setSelectionAnchor(null);
-        } else if (key.backspace || key.delete) {
+        } else if (isCtrlBackspace || isCtrlDelete || key.backspace || key.delete) {
             const delRes = deleteSelection();
             if (delRes) {
                 updateContent(delRes.newLines.join("\n"), delRes.newCursor);
                 setSelectionAnchor(null);
                 return;
             }
-            if (key.backspace || key.delete) {
+            if (isCtrlBackspace) {
+                if (cursor.x > 0) {
+                    const line = lines[cursor.y];
+                    const newX = findWordLeft(line, cursor.x);
+                    const newLines = [...lines];
+                    newLines[cursor.y] = line.slice(0, newX) + line.slice(cursor.x);
+                    updateContent(newLines.join("\n"), { x: newX, y: cursor.y });
+                } else if (cursor.y > 0) {
+                    const prevLen = lines[cursor.y - 1].length;
+                    const newLines = [...lines];
+                    newLines.splice(cursor.y - 1, 2, lines[cursor.y - 1] + lines[cursor.y]);
+                    updateContent(newLines.join("\n"), { x: prevLen, y: cursor.y - 1 });
+                }
+            } else if (isCtrlDelete) {
+                const line = lines[cursor.y];
+                if (cursor.x < line.length) {
+                    const newX = findWordRight(line, cursor.x);
+                    const newLines = [...lines];
+                    newLines[cursor.y] = line.slice(0, cursor.x) + line.slice(newX);
+                    updateContent(newLines.join("\n"), { x: cursor.x, y: cursor.y });
+                } else if (cursor.y < lines.length - 1) {
+                    const newLines = [...lines];
+                    newLines.splice(cursor.y, 2, lines[cursor.y] + lines[cursor.y + 1]);
+                    updateContent(newLines.join("\n"), { x: cursor.x, y: cursor.y });
+                }
+            } else {
                 // Windows terminal often maps Backspace to key.delete. We enforce backward deletion for both.
                 if (cursor.x > 0) {
                     const newLines = [...lines];
@@ -493,36 +570,24 @@ export const NotepadView: React.FC<NotepadViewProps> = ({ mode = "CHAT" }) => {
     // --- Render Logic ---
     const visibleLines = lines.slice(scrollOffset, scrollOffset + termRows);
 
-    const renderLine = (lineStr: string, actualY: number) => {
+    const renderRow = (lineStr: string, actualY: number): { before: string; cursor: string | null; after: string } => {
         const isCursorLine = actualY === cursor.y && isActive;
-        const lineLen = lineStr.length;
+        const safeCursor = Math.max(0, Math.min(lineStr.length, cursor.x));
+        const viewStart = isCursorLine
+            ? Math.max(0, Math.min(Math.max(0, lineStr.length - viewportWidth), safeCursor - Math.floor(viewportWidth / 2)))
+            : 0;
+        const viewEnd = viewStart + viewportWidth;
 
-        let chars = [];
-        for (let x = 0; x <= lineLen; x++) {
-            const isCursor = isCursorLine && x === cursor.x;
-            const isSel = isSelected(x, actualY);
-            const char = lineStr[x] || " ";
-
-            chars.push(
-                <Text
-                    key={x}
-                    backgroundColor={isCursor ? Theme.colors.primary : isSel ? Theme.colors.secondary : undefined}
-                    color={isCursor || isSel ? Theme.colors.text.inverse : Theme.colors.text.primary}
-                >
-                    {char}
-                </Text>
-            );
+        if (!isCursorLine) {
+            const visible = lineStr.slice(viewStart, viewEnd);
+            return { before: visible || " ", cursor: null, after: "" };
         }
 
-        // Horizontal overflow handling (very simple approach)
-        if (chars.length > termCols) {
-            if (cursor.x >= termCols - 5 && isCursorLine) {
-                chars = chars.slice(cursor.x - termCols + 10, cursor.x + 10);
-            } else {
-                chars = chars.slice(0, termCols);
-            }
-        }
-        return <Box flexGrow={1} overflow="hidden"><Text wrap="truncate-end">{chars}</Text></Box>;
+        const clampedCursor = Math.max(viewStart, Math.min(viewEnd - 1, safeCursor));
+        const before = lineStr.slice(viewStart, clampedCursor);
+        const cursorChar = lineStr[clampedCursor] ?? " ";
+        const after = lineStr.slice(clampedCursor + 1, viewEnd);
+        return { before, cursor: cursorChar, after };
     };
 
     return (
@@ -566,16 +631,41 @@ export const NotepadView: React.FC<NotepadViewProps> = ({ mode = "CHAT" }) => {
                         const actualY = idx + scrollOffset;
                         const lineNum = String(actualY + 1).padStart(4, " ");
                         return (
-                            <Box key={actualY} height={1} flexDirection="row" overflow="hidden">
-                                <Text color={Theme.colors.secondary} bold> {lineNum} │ </Text>
-                                {renderLine(lineStr, actualY)}
+                            <Box key={actualY} height={1} flexDirection="row" overflow="hidden" width="100%">
+                                <Box width={gutterWidth} flexShrink={0} overflow="hidden">
+                                    <Text color={Theme.colors.text.primary}>{` ${lineNum} │`}</Text>
+                                </Box>
+                                <Box flexGrow={1} flexShrink={1} minWidth={0} overflow="hidden">
+                                    {(() => {
+                                        const row = renderRow(lineStr, actualY);
+                                        if (row.cursor === null) {
+                                            return (
+                                                <Text color={Theme.colors.text.primary} wrap="truncate-end">
+                                                    {row.before}
+                                                </Text>
+                                            );
+                                        }
+                                        return (
+                                            <Text wrap="truncate-end">
+                                                <Text color={Theme.colors.text.primary}>{row.before}</Text>
+                                                <Text backgroundColor={Theme.colors.primary} color={Theme.colors.text.inverse}>{row.cursor}</Text>
+                                                <Text color={Theme.colors.text.primary}>{row.after}</Text>
+                                            </Text>
+                                        );
+                                    })()}
+                                </Box>
                             </Box>
                         );
                     })}
                     {visibleLines.length < termRows &&
                         Array.from({ length: termRows - visibleLines.length }).map((_, i) => (
-                            <Box key={`empty-${i}`} height={1}>
-                                <Text color={Theme.colors.secondary} bold dimColor>   ~ │</Text>
+                            <Box key={`empty-${i}`} height={1} width="100%" flexDirection="row" overflow="hidden">
+                                <Box width={gutterWidth} flexShrink={0} overflow="hidden">
+                                    <Text color={Theme.colors.secondary} bold dimColor>{"   ~ │"}</Text>
+                                </Box>
+                                <Box flexGrow={1} flexShrink={1} minWidth={0} overflow="hidden">
+                                    <Text>{" "}</Text>
+                                </Box>
                             </Box>
                         ))
                     }
