@@ -8,6 +8,7 @@ interface ViewSwitcherProps {
     memoryCount: number;
     toolCount: number;
     status: string;
+    viewHotkeys?: Partial<Record<ViewId, string>>;
 }
 
 const VIEWS: { id: ViewId; label: string }[] = [
@@ -17,6 +18,7 @@ const VIEWS: { id: ViewId; label: string }[] = [
     { id: "tools", label: "TOOLS" },
     { id: "mcp", label: "MCP" },
     { id: "graph", label: "GRAPH" },
+    { id: "config", label: "CONFIG" },
 ];
 
 export const ViewSwitcher: React.FC<ViewSwitcherProps> = ({
@@ -24,6 +26,7 @@ export const ViewSwitcher: React.FC<ViewSwitcherProps> = ({
     memoryCount,
     toolCount,
     status,
+    viewHotkeys = {},
 }) => {
     return (
         <Box flexDirection="column" width="100%" marginBottom={0}>
@@ -47,7 +50,7 @@ export const ViewSwitcher: React.FC<ViewSwitcherProps> = ({
                                         backgroundColor={isActive ? Theme.colors.background.highlight : undefined}
                                         bold={isActive}
                                     >
-                                        {` ${idx + 1} ${v.label} `}
+                                        {` ${viewHotkeys[v.id] ?? idx + 1} ${v.label} `}
                                     </Text>
                                 </Box>
                             );

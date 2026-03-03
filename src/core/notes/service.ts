@@ -1,6 +1,8 @@
-import { readFile, writeFile, mkdir, readdir, unlink } from "node:fs/promises";
-import { join } from "node:path";
+import { access, readFile, writeFile, mkdir, readdir, unlink } from "node:fs/promises";
+import { constants } from "node:fs";
+import { join, resolve } from "node:path";
 import clipboardy from "clipboardy";
+import { NoteDirectoryConfig } from "../config/settings";
 
 export interface NoteState {
     filename: string;
@@ -15,7 +17,13 @@ class NotepadService {
         isDirty: false,
     };
 
-    private notesDir = process.env.NOTES_DIR || join(process.cwd(), "notes");
+    private noteDirectories: NoteDirectoryConfig[] = [
+        {
+            path: process.env.NOTES_DIR || join(process.cwd(), "notes"),
+            read: true,
+            write: true,
+        }
+    ];
 
     // History and Clipboard
     private undoStack: string[] = [];
@@ -23,10 +31,26 @@ class NotepadService {
     private internalClipboard: string = "";
     private readonly allowedExts = [".txt", ".md"];
 
+    configureDirectories(directories: NoteDirectoryConfig[]) {
+        const cleaned = directories
+            .map((d) => ({ path: d.path, read: !!d.read, write: !!d.write }))
+            .filter((d) => d.path && (d.read || d.write));
+        if (cleaned.length > 0) {
+            this.noteDirectories = cleaned;
+        }
+    }
+
+    getDirectories(): NoteDirectoryConfig[] {
+        return [...this.noteDirectories];
+    }
+
     async init() {
-        try {
-            await mkdir(this.notesDir, { recursive: true });
-        } catch (e) { }
+        const writableDirs = this.noteDirectories.filter((d) => d.write);
+        for (const d of writableDirs) {
+            try {
+                await mkdir(d.path, { recursive: true });
+            } catch { }
+        }
 
         try {
             const files = await this.listFiles();
@@ -97,7 +121,8 @@ class NotepadService {
     // --- File Management ---
     async save() {
         if (!this.state.isDirty) return;
-        const fullPath = join(this.notesDir, this.state.filename);
+        const fullPath = await this.resolveWritablePath(this.state.filename);
+        if (!fullPath) throw new Error("No writable notes directory configured for this file");
         await writeFile(fullPath, this.state.content, "utf8");
         this.state.isDirty = false;
     }
@@ -112,10 +137,13 @@ class NotepadService {
     }
 
     async createNote(preferredName?: string): Promise<string> {
+        const targetDir = this.noteDirectories.find((d) => d.write);
+        if (!targetDir) throw new Error("No writable notes directory configured");
         const existing = new Set(await this.listFiles());
         const desired = this.normalizeFilename(preferredName || "untitled.txt");
         if (!existing.has(desired)) {
-            await writeFile(join(this.notesDir, desired), "", "utf8");
+            await mkdir(targetDir.path, { recursive: true });
+            await writeFile(join(targetDir.path, desired), "", "utf8");
             return desired;
         }
 
@@ -126,7 +154,7 @@ class NotepadService {
         while (i < 10000) {
             const candidate = `${base}-${i}${ext}`;
             if (!existing.has(candidate)) {
-                await writeFile(join(this.notesDir, candidate), "", "utf8");
+                await writeFile(join(targetDir.path, candidate), "", "utf8");
                 return candidate;
             }
             i += 1;
@@ -137,7 +165,8 @@ class NotepadService {
     async readFileContent(filename: string): Promise<string | null> {
         const safeName = this.normalizeFilename(filename);
         if (!this.allowedExts.some((ext) => safeName.toLowerCase().endsWith(ext))) return null;
-        const fullPath = join(this.notesDir, safeName);
+        const fullPath = await this.resolveReadablePath(safeName);
+        if (!fullPath) return null;
         try {
             return await readFile(fullPath, "utf8");
         } catch {
@@ -147,10 +176,11 @@ class NotepadService {
 
     async load(filename: string) {
         const safeName = this.normalizeFilename(filename);
-        const fullPath = join(this.notesDir, safeName);
+        const fullPath = await this.resolveReadablePath(safeName);
         this.undoStack = [];
         this.redoStack = [];
         try {
+            if (!fullPath) throw new Error("missing");
             const content = await readFile(fullPath, "utf8");
             this.state = { filename: safeName, content, isDirty: false };
         } catch (e) {
@@ -159,24 +189,58 @@ class NotepadService {
     }
 
     async listFiles(): Promise<string[]> {
+        const allFiles = new Set<string>();
         try {
-            const files = await readdir(this.notesDir);
-            return files
-                .filter((f) => this.allowedExts.some((ext) => f.toLowerCase().endsWith(ext)))
-                .sort((a, b) => a.localeCompare(b));
-        } catch (e) {
-            return [];
+            for (const dir of this.noteDirectories.filter((d) => d.read)) {
+                try {
+                    const files = await readdir(dir.path);
+                    files
+                        .filter((f) => this.allowedExts.some((ext) => f.toLowerCase().endsWith(ext)))
+                        .forEach((f) => allFiles.add(f));
+                } catch { }
+            }
+        } catch {
+            // no-op
         }
+        return [...allFiles].sort((a, b) => a.localeCompare(b));
     }
 
     async deleteFile(filename: string) {
         try {
             const safeName = this.normalizeFilename(filename);
-            const fullPath = join(this.notesDir, safeName);
+            const fullPath = await this.resolveWritablePath(safeName);
+            if (!fullPath) return;
             await unlink(fullPath);
         } catch (e) {
             // Ignore if file doesn't exist
         }
+    }
+
+    private async resolveReadablePath(filename: string): Promise<string | null> {
+        const readable = this.noteDirectories.filter((d) => d.read);
+        for (const dir of readable) {
+            const fullPath = join(dir.path, filename);
+            try {
+                await access(fullPath, constants.R_OK);
+                return fullPath;
+            } catch { }
+        }
+        return null;
+    }
+
+    private async resolveWritablePath(filename: string): Promise<string | null> {
+        const existingReadable = await this.resolveReadablePath(filename);
+        if (existingReadable) {
+            const existingResolved = resolve(existingReadable).toLowerCase();
+            for (const dir of this.noteDirectories.filter((d) => d.write)) {
+                const dirResolved = resolve(dir.path).toLowerCase();
+                if (existingResolved.startsWith(dirResolved)) return existingReadable;
+            }
+        }
+        const firstWritable = this.noteDirectories.find((d) => d.write);
+        if (!firstWritable) return null;
+        await mkdir(firstWritable.path, { recursive: true });
+        return join(firstWritable.path, filename);
     }
 }
 

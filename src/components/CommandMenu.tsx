@@ -6,6 +6,8 @@ export const COMMANDS = [
     { name: "/chat", params: "", desc: "Chat view" },
     { name: "/mem", params: "", desc: "Memory browser" },
     { name: "/notes", params: "", desc: "Open Notepad" },
+    { name: "/config", params: "", desc: "Open Config/Help panel" },
+    { name: "/reloadcfg", params: "", desc: "Reload YAML config" },
     { name: "/toollog", params: " [query]", desc: "Search tool logs" },
     { name: "/memorize", params: " [text]", desc: "Store long-term memory" },
     { name: "/help", params: "", desc: "Show help" },

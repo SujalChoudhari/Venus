@@ -114,6 +114,31 @@ describe("notepad service", () => {
     expect(notepadService.getState().filename).toBe(before);
   });
 
+  it("supports multiple directories with read/write permissions", async () => {
+    const writableDir = join(fixedNotesDir, "writable");
+    const readonlyDir = join(fixedNotesDir, "readonly");
+    await mkdir(writableDir, { recursive: true });
+    await mkdir(readonlyDir, { recursive: true });
+    await writeFile(join(readonlyDir, "ro-note.txt"), "from-ro", "utf8");
+
+    notepadService.configureDirectories([
+      { path: writableDir, read: true, write: true },
+      { path: readonlyDir, read: true, write: false },
+    ]);
+    await notepadService.init();
+
+    const files = await notepadService.listFiles();
+    expect(files.includes("ro-note.txt")).toBe(true);
+
+    await notepadService.load("ro-note.txt");
+    expect(notepadService.getState().content).toBe("from-ro");
+
+    notepadService.updateContent("edited");
+    await notepadService.save();
+    const savedRo = await notepadService.readFileContent("ro-note.txt");
+    expect(savedRo).toBe("edited");
+  });
+
   afterAll(async () => {
     mock.restore();
     await rm(fixedNotesDir, { recursive: true, force: true });

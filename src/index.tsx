@@ -14,8 +14,10 @@ import { MemoryBrowser } from "./components/MemoryBrowser";
 import { ToolLog, type ToolLogEntry } from "./components/ToolLog";
 import { McpManagerView } from "./components/McpManagerView";
 import { NotepadView } from "./components/NotepadView";
+import { ConfigPanel } from "./components/ConfigPanel";
 import { SplashScreen } from "./components/SplashScreen";
 import { notepadService } from "./core/notes/service";
+import { AppSettings, getSettings, getSettingsPath, loadSettings } from "./core/config/settings";
 
 import {
   initializeDatabase,
@@ -34,7 +36,7 @@ import { initializeAi, runAgentLoop, type GeminiMessage } from "./core/chat/serv
 
 import { Theme } from "./core/theme";
 
-export type ViewId = "dashboard" | "memory" | "tools" | "mcp" | "graph" | "notes";
+export type ViewId = "dashboard" | "memory" | "tools" | "mcp" | "graph" | "notes" | "config";
 export type AppMode = "CHAT" | "COMMAND" | "INSERT";
 
 type CountRow = { count: number };
@@ -48,6 +50,7 @@ type MemoryBrowserRow = {
 const WELCOME_MESSAGE = "NEW SESSION\nYou're back in context. What should we focus on?";
 const DEFAULT_MODEL = "gemma-3-27b-it";
 const randomId = () => Math.random().toString(36).slice(2);
+const VIEW_ORDER: ViewId[] = ["dashboard", "notes", "memory", "tools", "mcp", "graph", "config"];
 const toUiMessage = (m: ChatMessage): Message => ({
   id: m.id,
   role: m.role,
@@ -79,7 +82,8 @@ const App: React.FC = () => {
   const [activeView, setActiveView] = useState<ViewId>("dashboard");
   const [toolActivities, setToolActivities] = useState<ToolLogEntry[]>([]);
   const [memoryCount, setMemoryCount] = useState(0);
-  const [showSplash, setShowSplash] = useState(true);
+  const [settings, setSettings] = useState<AppSettings>(getSettings());
+  const [showSplash, setShowSplash] = useState(false);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [appMode, setAppMode] = useState<AppMode>("CHAT");
   const sessionStartedAt = useRef(new Date());
@@ -94,10 +98,21 @@ const App: React.FC = () => {
     sessionIdRef.current = currentSessionId;
   }, [currentSessionId]);
 
+  const matchesShortcut = (input: string, key: any, shortcut: string): boolean => {
+    const normalized = shortcut.trim().toLowerCase();
+    if (!normalized) return false;
+    if (normalized === "escape") return !!key.escape;
+    if (normalized === "tab") return !!key.tab && !key.shift;
+    if (normalized === "shift+tab") return !!key.tab && !!key.shift;
+    if (normalized === "ctrl+c") return !!key.ctrl && input === "c";
+    if (normalized.startsWith("ctrl+")) return !!key.ctrl && input === normalized.slice(5);
+    if (normalized.startsWith("alt+")) return !!key.meta && input === normalized.slice(4);
+    return input === normalized;
+  };
+
   // Modal Switching Logic (Vim-style 3-mode)
   useInput((input, key) => {
     if (key.ctrl && input === "c") {
-      // Manual global exit bypass when not editing notes
       if (appMode !== "INSERT" && activeView !== "notes") {
         exit();
         process.exit(0);
@@ -105,33 +120,36 @@ const App: React.FC = () => {
       return;
     }
 
-    if (key.escape) {
+    if (matchesShortcut(input, key, settings.shortcuts.modeCycle)) {
       setAppMode(prev => {
         if (prev === "CHAT") return "COMMAND";
         if (prev === "COMMAND") {
-          setActiveView("notes"); // Focus scratch pad by default in INSERT
+          setActiveView("notes");
           return "INSERT";
         }
-        setActiveView("dashboard"); // Focus chat by default in CHAT
+        setActiveView("dashboard");
         return "CHAT";
       });
       return;
     }
 
     if (appMode === "COMMAND") {
-      const views: ViewId[] = ["dashboard", "notes", "memory", "tools", "mcp", "graph"];
-
-      // Number key navigation (1-7)
-      if (input >= "1" && input <= "7") {
-        const targetIdx = parseInt(input) - 1;
-        if (views[targetIdx]) setActiveView(views[targetIdx]);
-        return;
+      for (const view of VIEW_ORDER) {
+        const hotkey = settings.shortcuts.commandViewHotkeys[view];
+        if (hotkey && matchesShortcut(input, key, hotkey)) {
+          setActiveView(view);
+          return;
+        }
       }
 
-      // Tab cycling in COMMAND mode
-      if (key.tab) {
-        const currentIdx = views.indexOf(activeView);
-        setActiveView(views[(currentIdx + 1) % views.length]);
+      if (matchesShortcut(input, key, settings.shortcuts.commandNextView)) {
+        const currentIdx = VIEW_ORDER.indexOf(activeView);
+        setActiveView(VIEW_ORDER[(currentIdx + 1) % VIEW_ORDER.length]);
+        return;
+      }
+      if (matchesShortcut(input, key, settings.shortcuts.commandPrevView)) {
+        const currentIdx = VIEW_ORDER.indexOf(activeView);
+        setActiveView(VIEW_ORDER[(currentIdx - 1 + VIEW_ORDER.length) % VIEW_ORDER.length]);
         return;
       }
     }
@@ -178,6 +196,12 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const init = async () => {
+      const loaded = await loadSettings();
+      setSettings(loaded);
+      setActiveView(loaded.ui.startupView);
+      setShowSplash(loaded.ui.showSplash);
+      notepadService.configureDirectories(loaded.notes.directories);
+
       await initializeDatabase();
       await notepadService.init(); // Ensure notepad files are checked and loaded
 
@@ -310,11 +334,26 @@ const App: React.FC = () => {
         case "notes": setActiveView("notes"); return;
         case "mcp": setActiveView("mcp"); return;
         case "graph": setActiveView("graph"); return;
+        case "config":
+        case "settings": setActiveView("config"); return;
+        case "reloadcfg": {
+          const loaded = await loadSettings();
+          setSettings(loaded);
+          notepadService.configureDirectories(loaded.notes.directories);
+          await notepadService.init();
+          setMessages(prev => [...prev, {
+            id: randomId(),
+            role: "assistant",
+            content: `✅ Config reloaded from ${getSettingsPath()}`,
+            timestamp: new Date()
+          }]);
+          return;
+        }
 
         case "help":
           setMessages(prev => [...prev, {
             id: randomId(), role: "assistant",
-            content: `Commands:\n/new /sessions /load /delete /memorize /recall /dash /chat /mem /notes /toollog /mcp /graph`,
+            content: `Commands:\n/new /sessions /load /delete /memorize /recall /dash /chat /mem /notes /toollog /mcp /graph /config /reloadcfg`,
             timestamp: new Date()
           }]);
           return;
@@ -466,6 +505,7 @@ const App: React.FC = () => {
       case "notes": return <NotepadView mode={appMode} />;
       case "mcp": return <McpManagerView />;
       case "graph": return <GraphView appMode={appMode} />;
+      case "config": return <ConfigPanel mode={appMode} configPath={getSettingsPath()} />;
 
       case "dashboard":
       default:
@@ -495,6 +535,7 @@ const App: React.FC = () => {
           memoryCount={memoryCount}
           toolCount={8}
           status={mcpStatus}
+          viewHotkeys={settings.shortcuts.commandViewHotkeys}
         />
       </Box>
 
@@ -505,12 +546,12 @@ const App: React.FC = () => {
           {renderCenterPanel()}
         </Box>
 
-        {/* Sidebar — Hides in notes/insert mode to give focus */}
-        {activeView !== "notes" && appMode !== "INSERT" && (
+        {/* Sidebar — configurable visibility */}
+        {(!settings.ui.hideSidebarInNotes || (activeView !== "notes" && appMode !== "INSERT")) && (
           <Box flexDirection="column" width={sidebarWidth} flexShrink={0} height={mainHeight}>
-            <KnowledgeGraphPanel panelWidth={sidebarWidth} />
-            <ActivityPanel activities={toolActivities} />
-            <SystemStatsPanel panelWidth={sidebarWidth} />
+            {settings.ui.showKnowledgeGraphPanel && <KnowledgeGraphPanel panelWidth={sidebarWidth} />}
+            {settings.ui.showActivityPanel && <ActivityPanel activities={toolActivities} />}
+            {settings.ui.showSystemStatsPanel && <SystemStatsPanel panelWidth={sidebarWidth} />}
           </Box>
         )}
       </Box>
@@ -530,11 +571,11 @@ const App: React.FC = () => {
         <Box justifyContent="space-between" paddingX={2} marginBottom={0}>
           <Text color={Theme.colors.text.muted} dimColor>
             {appMode === "CHAT"
-              ? "ESC: Enter COMMAND Mode  •  "
+              ? `${settings.shortcuts.modeCycle}: command mode  •  `
               : appMode === "COMMAND"
-                ? "ESC: Enter INSERT Mode (Notes)  •  "
-                : "ESC: Enter CHAT Mode  •  "}
-            1-7: Switch View  •  Shift+↑↓: scroll chat  •  ↑↓: command history  •  TAB: cycle
+                ? `${settings.shortcuts.modeCycle}: insert mode  •  `
+                : `${settings.shortcuts.modeCycle}: chat mode  •  `}
+            {`views: ${Object.keys(settings.shortcuts.commandViewHotkeys).length} hotkeys  •  ${settings.shortcuts.commandNextView}: next view  •  ↑↓ history`}
           </Text>
           <Text color={Theme.colors.text.muted} dimColor>
             Session started {sessionStartedAt.current.toLocaleString()}
