@@ -1,6 +1,6 @@
-import { access, readFile, writeFile, mkdir, readdir, unlink } from "node:fs/promises";
+import { access, readFile, writeFile, mkdir, readdir, rename, unlink } from "node:fs/promises";
 import { constants } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import clipboardy from "clipboardy";
 import { NoteDirectoryConfig } from "../config/settings";
 
@@ -220,6 +220,43 @@ class NotepadService {
         } catch (e) {
             // Ignore if file doesn't exist
         }
+    }
+
+    async renameFile(oldFilename: string, newFilename: string): Promise<string> {
+        const oldSafe = this.normalizeFilename(oldFilename);
+        const newSafe = this.normalizeFilename(newFilename);
+        if (oldSafe === newSafe) return newSafe;
+
+        const oldPath = await this.resolveReadablePath(oldSafe);
+        if (!oldPath) throw new Error(`File not found: ${oldSafe}`);
+
+        const existingNew = await this.resolveReadablePath(newSafe);
+        if (existingNew) throw new Error(`A file named "${newSafe}" already exists`);
+
+        const oldResolved = resolve(oldPath).toLowerCase();
+        let targetPath: string | null = null;
+
+        for (const dir of this.noteDirectories.filter((d) => d.write)) {
+            const dirResolved = resolve(dir.path).toLowerCase();
+            if (oldResolved.startsWith(dirResolved)) {
+                targetPath = join(dir.path, newSafe);
+                break;
+            }
+        }
+
+        if (!targetPath) {
+            const firstWritable = this.noteDirectories.find((d) => d.write);
+            if (!firstWritable) throw new Error("No writable notes directory configured for rename");
+            targetPath = join(firstWritable.path, newSafe);
+        }
+
+        await mkdir(dirname(targetPath), { recursive: true });
+        await rename(oldPath, targetPath);
+
+        if (this.state.filename === oldSafe) {
+            this.state.filename = newSafe;
+        }
+        return newSafe;
     }
 
     private async resolveReadablePath(filename: string): Promise<string | null> {

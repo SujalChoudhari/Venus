@@ -56,6 +56,11 @@ export const NotepadView: React.FC<NotepadViewProps> = ({ mode = "CHAT", panelWi
     const [showFileSwitcher, setShowFileSwitcher] = useState(false);
     const [fileList, setFileList] = useState<string[]>([]);
     const [fileSwitcherIndex, setFileSwitcherIndex] = useState(0);
+    const [showRenameDialog, setShowRenameDialog] = useState(false);
+    const [renameInput, setRenameInput] = useState("");
+    const [renameError, setRenameError] = useState<string | null>(null);
+    const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+    const [deleteError, setDeleteError] = useState<string | null>(null);
 
     // Sync content when switching tabs
     useEffect(() => {
@@ -279,6 +284,21 @@ export const NotepadView: React.FC<NotepadViewProps> = ({ mode = "CHAT", panelWi
 
         // --- Global Micro Shortcuts ---
         if (key.ctrl) {
+            if (input === "r") {
+                if (activeTab) {
+                    setRenameInput(activeTab.filename);
+                    setRenameError(null);
+                    setShowRenameDialog(true);
+                }
+                return;
+            }
+            if (input === "d") {
+                if (activeTab) {
+                    setDeleteError(null);
+                    setShowDeleteDialog(true);
+                }
+                return;
+            }
             if (input === "s") {
                 await notepadService.save();
                 setTabs((prev) => {
@@ -332,7 +352,7 @@ export const NotepadView: React.FC<NotepadViewProps> = ({ mode = "CHAT", panelWi
                 }
                 return;
             }
-            if (input === "y" || input === "r") { // Redo
+            if (input === "y") { // Redo
                 if (notepadService.redo()) {
                     const newState = notepadService.getState();
                     const normalized = normalizeLineEndings(newState.content);
@@ -439,6 +459,104 @@ export const NotepadView: React.FC<NotepadViewProps> = ({ mode = "CHAT", panelWi
             }
         }
 
+        // --- Rename Overlay ---
+        if (showRenameDialog) {
+            if (key.escape) {
+                setShowRenameDialog(false);
+                setRenameError(null);
+                return;
+            }
+            if (key.return) {
+                if (!activeTab) return;
+                const nextName = renameInput.trim();
+                if (!nextName) {
+                    setRenameError("Filename cannot be empty");
+                    return;
+                }
+                try {
+                    if (activeTab.isDirty) {
+                        await notepadService.save();
+                    }
+                    const oldName = activeTab.filename;
+                    const renamed = await notepadService.renameFile(oldName, nextName);
+                    setTabs((prev) =>
+                        prev.map((t, i) =>
+                            i === activeTabIdx
+                                ? { ...t, filename: renamed, isDirty: false }
+                                : (t.filename === oldName ? { ...t, filename: renamed } : t)
+                        )
+                    );
+                    setShowRenameDialog(false);
+                    setRenameError(null);
+                } catch (e: unknown) {
+                    setRenameError(e instanceof Error ? e.message : "Rename failed");
+                }
+                return;
+            }
+            if (key.backspace || key.delete) {
+                setRenameInput((prev) => prev.slice(0, -1));
+                return;
+            }
+            if (input) {
+                const cleanInput = input.replace(/[\x00-\x1F\x7F-\x9F]/g, "");
+                if (cleanInput.length > 0) {
+                    setRenameInput((prev) => prev + cleanInput);
+                    setRenameError(null);
+                }
+            }
+            return;
+        }
+
+        // --- Delete Overlay ---
+        if (showDeleteDialog) {
+            if (key.escape || input.toLowerCase() === "n") {
+                setShowDeleteDialog(false);
+                setDeleteError(null);
+                return;
+            }
+            if (key.return || input.toLowerCase() === "y") {
+                if (!activeTab) return;
+                try {
+                    const deletingName = activeTab.filename;
+                    await notepadService.deleteFile(deletingName);
+
+                    if (tabs.length > 1) {
+                        const remaining = tabs.filter((_, i) => i !== activeTabIdx);
+                        const nextIdx = Math.max(0, activeTabIdx - 1);
+                        const nextTab = remaining[nextIdx];
+                        setTabs(remaining);
+                        setActiveTabIdx(nextIdx);
+                        setContent(normalizeLineEndings(nextTab.content));
+                        setCursor({ x: 0, y: 0 });
+                        setPreferredX(0);
+                        setScrollOffset(0);
+                        setSelectionAnchor(null);
+                        await notepadService.load(nextTab.filename);
+                    } else {
+                        await notepadService.load("scratchpad.txt");
+                        const fallback = {
+                            ...notepadService.getState(),
+                            content: normalizeLineEndings(notepadService.getState().content),
+                        };
+                        setTabs([fallback]);
+                        setActiveTabIdx(0);
+                        setContent(fallback.content);
+                        setCursor({ x: 0, y: 0 });
+                        setPreferredX(0);
+                        setScrollOffset(0);
+                        setSelectionAnchor(null);
+                    }
+
+                    setShowDeleteDialog(false);
+                    setDeleteError(null);
+                } catch (e: unknown) {
+                    setDeleteError(e instanceof Error ? e.message : "Delete failed");
+                }
+                return;
+            }
+            return;
+        }
+
         // --- Navigation ---
         if (key.upArrow) {
             const newY = Math.max(0, cursor.y - 1);
@@ -446,6 +564,7 @@ export const NotepadView: React.FC<NotepadViewProps> = ({ mode = "CHAT", panelWi
             handleMove(Math.min(preferredX, lineLen), newY, shiftHeld, true);
             return;
         }
+
         if (key.downArrow) {
             const newY = Math.min(lines.length - 1, cursor.y + 1);
             const lineLen = lines[newY]?.length || 0;
@@ -625,6 +744,39 @@ export const NotepadView: React.FC<NotepadViewProps> = ({ mode = "CHAT", panelWi
                         </Box>
                     </Box>
                 </Box>
+            ) : showRenameDialog ? (
+                <Box flexGrow={1} justifyContent="center" alignItems="center">
+                    <Box flexDirection="column" borderStyle="round" borderColor={Theme.colors.primary} padding={1} width="80%">
+                        <Text color={Theme.colors.primary} bold>Rename File (Enter to apply, Esc to cancel)</Text>
+                        <Box marginTop={1}>
+                            <Text>{renameInput || " "}</Text>
+                        </Box>
+                        {renameError ? (
+                            <Box marginTop={1}>
+                                <Text color={Theme.colors.status.error}>{renameError}</Text>
+                            </Box>
+                        ) : null}
+                    </Box>
+                </Box>
+            ) : showDeleteDialog ? (
+                <Box flexGrow={1} justifyContent="center" alignItems="center">
+                    <Box flexDirection="column" borderStyle="round" borderColor={Theme.colors.status.error} padding={1} width="80%">
+                        <Text color={Theme.colors.status.error} bold>Delete file permanently?</Text>
+                        <Box marginTop={1}>
+                            <Text color={Theme.colors.text.primary}>
+                                {activeTab ? activeTab.filename : "(no active file)"}
+                            </Text>
+                        </Box>
+                        <Box marginTop={1}>
+                            <Text color={Theme.colors.text.muted}>Enter/Y = delete | Esc/N = cancel</Text>
+                        </Box>
+                        {deleteError ? (
+                            <Box marginTop={1}>
+                                <Text color={Theme.colors.status.error}>{deleteError}</Text>
+                            </Box>
+                        ) : null}
+                    </Box>
+                </Box>
             ) : (
                 <Box flexGrow={1} flexDirection="column" overflow="hidden">
                     {visibleLines.map((lineStr, idx) => {
@@ -685,7 +837,7 @@ export const NotepadView: React.FC<NotepadViewProps> = ({ mode = "CHAT", panelWi
             {/* 4. Helper/Hint Bar */}
             <Box flexDirection="row" paddingX={1} flexShrink={0}>
                 <Text color={Theme.colors.text.muted} italic>
-                    ^S Save | ^N New | ^O Open | ^Q Close Tab | ^C/^V Copy/Paste | ^Z Undo | ^A/^E Home/End
+                    ^S Save | ^N New | ^O Open | ^R Rename | ^D Delete | ^Q Close Tab | ^C/^V Copy/Paste | ^Z/^Y Undo/Redo
                 </Text>
             </Box>
         </Box>
